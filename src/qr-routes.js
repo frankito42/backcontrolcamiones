@@ -14,11 +14,17 @@ const clean = (value) => typeof value === 'string' ? value.trim() : '';
 export async function claimQrToken(token, database = pool, now = Math.floor(Date.now() / 1000)) {
   const claimed = await database.query(
     `UPDATE qr_tokens SET claimed_at = CURRENT_TIMESTAMP, expires_at = $2
-     WHERE token = $1 AND used = FALSE AND claimed_at IS NULL AND expires_at >= $3
-     RETURNING zona_id`,
+     WHERE token = $1 AND used = FALSE AND claimed_at IS NULL AND expires_at >= $3`,
     [token, now + 300, now],
   );
-  if (claimed.rowCount) return { zoneId: claimed.rows[0].zona_id };
+  if (claimed.rowCount) {
+    const zone = await database.query(
+      'SELECT zona_id FROM qr_tokens WHERE token = $1',
+      [token],
+    );
+    if (!zone.rowCount) throw new Error('El token QR reclamado ya no existe.');
+    return { zoneId: zone.rows[0].zona_id };
+  }
 
   const result = await database.query(
     'SELECT zona_id, expires_at, claimed_at, used FROM qr_tokens WHERE token = $1',

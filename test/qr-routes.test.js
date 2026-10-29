@@ -10,6 +10,9 @@ test('el primer escaneo reclama el token y un segundo escaneo recibe conflicto',
       if (sql.includes('UPDATE qr_tokens')) {
         if (alreadyClaimed) return { rowCount: 0, rows: [] };
         alreadyClaimed = true;
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('SELECT zona_id FROM qr_tokens')) {
         return { rowCount: 1, rows: [{ zona_id: 7 }] };
       }
       return {
