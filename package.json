@@ -1,0 +1,32 @@
+{
+  "name": "control-rutas-camiones-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "db:create": "node scripts/create-database.js",
+    "db:schema": "node scripts/apply-schema.js",
+    "db:limpiar-operativo": "node scripts/limpiar-datos-operativos.js",
+    "db:migrate:mysql": "node scripts/migrate-mysql-to-postgres.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "firebase-admin": "^14.5.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.14.5",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}
