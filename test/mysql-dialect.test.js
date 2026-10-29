@@ -58,6 +58,7 @@ test('translates conflict updates, case-insensitive search and PostgreSQL casts'
     values: ['%ana%'],
   });
   assert.equal(compileMysqlQuery('SELECT BTRIM(nombre) FROM usuarios').sql, 'SELECT TRIM(nombre) FROM usuarios');
+  assert.equal(compileMysqlQuery('SELECT u."user" FROM usuarios u').sql, 'SELECT u.`user` FROM usuarios u');
 });
 
 test('translates PostgreSQL interval expressions to MariaDB date arithmetic', () => {

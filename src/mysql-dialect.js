@@ -1,5 +1,6 @@
 function normalizeSql(sql) {
   let normalized = sql
+    .replace(/"([A-Za-z_][A-Za-z0-9_]*)"/g, '`$1`')
     .replace(/\bILIKE\b/gi, 'LIKE')
     .replace(/\bBTRIM\s*\(/gi, 'TRIM(')
     .replace(/\bFOR\s+UPDATE\s+OF\s+[A-Za-z_][A-Za-z0-9_]*/gi, 'FOR UPDATE')
