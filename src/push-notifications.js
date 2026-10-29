@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
+import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { pool } from './db.js';
 import { authenticateChatToken } from './chat-auth.js';
@@ -8,6 +8,27 @@ import { fail, respond } from './helpers.js';
 const firebaseAppName = 'control-rutas-camiones-push';
 const maxDeviceTokenLength = 700;
 
+export function parseFirebaseServiceAccountJson(value) {
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(value);
+  } catch {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON no contiene JSON válido.');
+  }
+  if (
+    !serviceAccount
+    || typeof serviceAccount !== 'object'
+    || typeof serviceAccount.project_id !== 'string'
+    || typeof serviceAccount.client_email !== 'string'
+    || typeof serviceAccount.private_key !== 'string'
+  ) {
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT_JSON debe incluir project_id, client_email y private_key.',
+    );
+  }
+  return serviceAccount;
+}
+
 function bearerToken(req) {
   const authorization = req.headers.authorization || '';
   return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
@@ -15,8 +36,16 @@ function bearerToken(req) {
 
 function getFirebaseMessaging() {
   const existingApp = getApps().find((app) => app.name === firebaseAppName);
+  let credential;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim()) {
+    credential = cert(
+      parseFirebaseServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+    );
+  } else {
+    credential = applicationDefault();
+  }
   const app = existingApp || initializeApp({
-    credential: applicationDefault(),
+    credential,
     ...(process.env.FIREBASE_PROJECT_ID
       ? { projectId: process.env.FIREBASE_PROJECT_ID }
       : {}),
