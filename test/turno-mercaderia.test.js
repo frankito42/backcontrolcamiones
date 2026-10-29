@@ -36,15 +36,15 @@ test('crea turnos guardando la mercadería y la devuelve en la respuesta', async
       if (sql.includes('SELECT id, patente FROM turnos')) {
         return { rows: [], rowCount: 0 };
       }
-      if (sql.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 1 };
+      if (sql.includes('FROM zonas ORDER BY id LIMIT 1 FOR UPDATE')) return { rows: [{ id: 1 }], rowCount: 1 };
       if (sql.includes('MAX(numero)')) return { rows: [{ numero: 88 }], rowCount: 1 };
       if (sql.includes('INSERT INTO turnos')) {
         assert.match(sql, /mercaderia/);
         insertValues = values;
-        return {
-          rows: [{ id: 41, numero: 88, fecha_ingreso: '2026-10-08', hora_ingreso: '11:00:00' }],
-          rowCount: 1,
-        };
+        return { insertId: 41, rowCount: 1 };
+      }
+      if (sql.includes('SELECT id, numero, fecha_ingreso, hora_ingreso FROM turnos')) {
+        return { rows: [{ id: 41, numero: 88, fecha_ingreso: '2026-10-08', hora_ingreso: '11:00:00' }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO turno_historial')) return { rows: [], rowCount: 1 };
       throw new Error(`Unexpected query: ${sql}`);
@@ -113,14 +113,14 @@ test('guarda la mercadería como vacía y exige destino', async (context) => {
       if (sql.includes('SELECT id, patente FROM turnos')) {
         return { rows: [], rowCount: 0 };
       }
-      if (sql.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 1 };
+      if (sql.includes('FROM zonas ORDER BY id LIMIT 1 FOR UPDATE')) return { rows: [{ id: 1 }], rowCount: 1 };
       if (sql.includes('MAX(numero)')) return { rows: [{ numero: 88 }], rowCount: 1 };
       if (sql.includes('INSERT INTO turnos')) {
         insertValues = values;
-        return {
-          rows: [{ id: 42, numero: 89, fecha_ingreso: '2026-10-08', hora_ingreso: '11:00:00' }],
-          rowCount: 1,
-        };
+        return { insertId: 42, rowCount: 1 };
+      }
+      if (sql.includes('SELECT id, numero, fecha_ingreso, hora_ingreso FROM turnos')) {
+        return { rows: [{ id: 42, numero: 89, fecha_ingreso: '2026-10-08', hora_ingreso: '11:00:00' }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO turno_historial')) return { rows: [], rowCount: 1 };
       throw new Error(`Unexpected query: ${sql}`);

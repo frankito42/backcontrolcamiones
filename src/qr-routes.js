@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { pool, withTransaction } from './db.js';
+import { lockTurnNumberSequence, pool, withTransaction } from './db.js';
 import { escapeHtml, fail, publicBaseUrl, respond } from './helpers.js';
 import {
   emitDefibaTurnosChanged,
@@ -187,25 +187,25 @@ async function submitQrTurn({ zoneId, plate, token, res }) {
       const seed = token || `${zoneId}|${Date.now()}|${plate}`;
       const dni = `QR${crypto.createHash('sha256').update(`${seed}|${plate}`).digest('hex').slice(0, 17).toUpperCase()}`;
       const inserted = await client.query(
-        `INSERT INTO camioneros (nombre, dni, patente) VALUES ('Pendiente de completar', $1, $2) RETURNING id`, [dni, plate],
+        `INSERT INTO camioneros (nombre, dni, patente) VALUES ('Pendiente de completar', $1, $2)`, [dni, plate],
       );
-      driverId = inserted.rows[0].id;
+      driverId = inserted.insertId;
     }
     const active = await client.query(
-      'SELECT patente FROM turnos WHERE camionero_id = $1 AND estado = ANY($2::varchar[])',
+      'SELECT patente FROM turnos WHERE camionero_id = $1 AND estado IN ($2)',
       [driverId, ['reservado', 'pendiente', 'en_curso']],
     );
     const conflict = active.rows.find((row) => row.patente.toUpperCase() !== plate);
     if (conflict) throw new Error(`Ya tenés un turno activo con patente diferente: ${conflict.patente}.`);
 
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('turnos-global-number'))");
+    await lockTurnNumberSequence(client);
     const latest = await client.query('SELECT COALESCE(MAX(numero), 0) + 1 AS numero FROM turnos');
     const number = latest.rows[0].numero;
     const inserted = await client.query(
       `INSERT INTO turnos (numero, camionero_id, patente, estado, zona_id)
-       VALUES ($1, $2, $3, 'pendiente', $4) RETURNING id`, [number, driverId, plate, zoneId],
+       VALUES ($1, $2, $3, 'pendiente', $4)`, [number, driverId, plate, zoneId],
     );
-    const turnId = inserted.rows[0].id;
+    const turnId = inserted.insertId;
     await client.query(
       `INSERT INTO turno_historial (turno_id, zona_id, estado, evento, origen)
        VALUES ($1, $2, 'pendiente', 'estado', 'qr')`, [turnId, zoneId],

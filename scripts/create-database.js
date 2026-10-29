@@ -1,30 +1,36 @@
 import '../src/config.js';
-import pg from 'pg';
+import mysql from 'mysql2/promise';
 import { assertDatabaseConfig } from '../src/db.js';
 
-let client;
+let connection;
 
 try {
   assertDatabaseConfig();
-  const target = new URL(process.env.DATABASE_URL);
-  const database = decodeURIComponent(target.pathname.replace(/^\//, ''));
+  const database = process.env.MYSQL_DATABASE;
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(database)) {
-    throw new Error('El nombre de base en DATABASE_URL solo puede contener letras, números y guion bajo.');
+    throw new Error('MYSQL_DATABASE solo puede contener letras, números y guion bajo.');
   }
 
-  target.pathname = '/postgres';
-  client = new pg.Client({ connectionString: target.toString() });
-  await client.connect();
-  const exists = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [database]);
-  if (exists.rowCount) {
+  connection = await mysql.createConnection({
+    host: process.env.MYSQL_HOST,
+    port: Number(process.env.MYSQL_PORT || 3306),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    charset: 'utf8mb4',
+  });
+  const [exists] = await connection.query(
+    'SELECT 1 FROM information_schema.schemata WHERE schema_name = ?',
+    [database],
+  );
+  if (exists.length) {
     console.log(`La base ${database} ya existe; no se modificó.`);
   } else {
-    await client.query(`CREATE DATABASE "${database}"`);
+    await connection.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     console.log(`Base ${database} creada.`);
   }
 } catch (error) {
-  console.error('No se pudo preparar la base PostgreSQL:', error.message);
+  console.error('No se pudo preparar la base MySQL:', error.message);
   process.exitCode = 1;
 } finally {
-  if (client) await client.end().catch(() => {});
+  if (connection) await connection.end();
 }

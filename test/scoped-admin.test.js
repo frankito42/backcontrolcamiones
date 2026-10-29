@@ -88,7 +88,7 @@ test('el admin de Defiba crea sus usuarios únicamente en la zona Defiba', async
     assert.match(sql, /INSERT INTO usuarios/);
     assert.equal(values[4], 'Defiba');
     assert.equal(values[7], 'defiba');
-    return { rows: [{ id: 123 }], rowCount: 1 };
+    return { insertId: 123, rowCount: 1 };
   });
   const baseUrl = await startApp(context, (app) => registerAccountRoutes(app, {
     authenticate: async (token) => token === 'defiba-token'
@@ -119,8 +119,8 @@ test('el admin de Defiba crea sus usuarios únicamente en la zona Defiba', async
 
 test('el admin de Tránsito solo lista operadores y pases de Ruta 11 y Ruta 86', async (context) => {
   context.mock.method(pool, 'query', async (sql) => {
-    assert.match(sql, /LOWER\(BTRIM\(u\.rol\)\) IN \('operador', 'pase'\)/);
-    assert.match(sql, /LOWER\(BTRIM\(COALESCE\(u\.zona, ''\)\)\) IN \('ruta 11', 'ruta 86'\)/);
+    assert.match(sql, /LOWER\(TRIM\(u\.rol\)\) IN \('operador', 'pase'\)/);
+    assert.match(sql, /LOWER\(TRIM\(COALESCE\(u\.zona, ''\)\)\) IN \('ruta 11', 'ruta 86'\)/);
     assert.doesNotMatch(sql, /u\.pass/);
     return {
       rows: [
@@ -151,7 +151,7 @@ test('el admin de Tránsito solo crea usuarios en las zonas autorizadas', async 
     assert.match(sql, /INSERT INTO usuarios/);
     assert.equal(values[4], 'Ruta 86');
     assert.equal(values[7], 'pase');
-    return { rows: [{ id: 123 }], rowCount: 1 };
+    return { insertId: 123, rowCount: 1 };
   });
   const baseUrl = await startApp(context, (app) => registerAccountRoutes(app, {
     authenticate: async () => ({ id: 92, rol: 'admin_transito' }),
@@ -183,7 +183,7 @@ test('el dashboard de Tránsito cuenta turnos Playa solo en Ruta 11 y Ruta 86', 
   context.mock.method(pool, 'query', async (sql, values = []) => {
     assert.match(sql, /SELECT 'Ruta 11' AS nombre, 1 AS orden/);
     assert.match(sql, /SELECT 'Ruta 86' AS nombre, 2 AS orden/);
-    assert.match(sql, /LOWER\(BTRIM\(t\.estado\)\) = 'reservado'/);
+    assert.match(sql, /LOWER\(TRIM\(t\.estado\)\) = 'reservado'/);
     assert.match(sql, /t\.aduana_confirmado = FALSE/);
     assert.deepEqual(values, []);
     return {
@@ -330,8 +330,8 @@ test('el panel de finalizados consulta solo cierres de Aduana por destino y fech
     assert.doesNotMatch(sql, /h\.origen = 'aduana'/);
     assert.match(sql, /t\.destino_id = \$1/);
     assert.match(sql, /COALESCE\(\(SELECT MAX\(h\.registrado_en\)/);
-    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) >= \$2::date/);
-    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) < \(\$3::date \+ INTERVAL '1 day'\)/);
+    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) >= \$2/);
+    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) < DATE_ADD\(\$3, INTERVAL 1 DAY\)/);
     assert.deepEqual(values, [9, '2026-10-01', '2026-10-20']);
     return {
       rows: [{
@@ -380,10 +380,10 @@ test('el panel de finalizados solo admite admin de Aduana', async (context) => {
 
 test('el dashboard Defiba incluye todos los estados y filtra destino y fechas', async (context) => {
   context.mock.method(pool, 'query', async (sql, values = []) => {
-    assert.match(sql, /LOWER\(BTRIM\(COALESCE\(t\.origen, ''\)\)\) = 'defiba'/);
+    assert.match(sql, /LOWER\(TRIM\(COALESCE\(t\.origen, ''\)\)\) = 'defiba'/);
     assert.match(sql, /t\.destino_id = \$1/);
-    assert.match(sql, /t\.fecha_ingreso >= \$2::date/);
-    assert.match(sql, /t\.fecha_ingreso < \(\$3::date \+ INTERVAL '1 day'\)/);
+    assert.match(sql, /t\.fecha_ingreso >= \$2/);
+    assert.match(sql, /t\.fecha_ingreso < DATE_ADD\(\$3, INTERVAL 1 DAY\)/);
     assert.doesNotMatch(sql, /t\.estado =/);
     assert.deepEqual(values, [8, '2026-10-01', '2026-10-20']);
     return {
@@ -433,7 +433,7 @@ test('el dashboard Defiba rechaza roles de otras áreas', async (context) => {
 
 test('el admin de Defiba solo recibe turnos del flujo Defiba', async (context) => {
   context.mock.method(pool, 'query', async (sql, values = []) => {
-    assert.match(sql, /LOWER\(BTRIM\(COALESCE\(t\.origen, ''\)\)\) = 'defiba'/);
+    assert.match(sql, /LOWER\(TRIM\(COALESCE\(t\.origen, ''\)\)\) = 'defiba'/);
     assert.deepEqual(values, []);
     return { rows: [] };
   });

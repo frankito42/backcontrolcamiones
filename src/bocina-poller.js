@@ -27,7 +27,7 @@ export function createBocinaPoller(database, {
 
       const claim = await database.query(
         `UPDATE turnos SET bocina_procesando=TRUE, bocina_reclamada_en=CURRENT_TIMESTAMP
-         WHERE id=$1 AND bocina_pendiente=TRUE AND bocina_procesando=FALSE RETURNING id`, [id],
+         WHERE id=$1 AND bocina_pendiente=TRUE AND bocina_procesando=FALSE`, [id],
       );
       if (!claim.rowCount) return;
 
@@ -65,7 +65,7 @@ export function createBocinaPoller(database, {
       await database.query(
         `UPDATE turnos SET bocina_procesando=FALSE, bocina_reclamada_en=NULL
          WHERE bocina_procesando=TRUE
-           AND (bocina_reclamada_en IS NULL OR bocina_reclamada_en < CURRENT_TIMESTAMP - INTERVAL '10 minutes')`,
+           AND (bocina_reclamada_en IS NULL OR bocina_reclamada_en < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 10 MINUTE))`,
       );
       const result = await database.query(
         `SELECT id, numero, patente FROM turnos

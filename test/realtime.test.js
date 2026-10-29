@@ -99,7 +99,7 @@ test('presencia se limpia si el usuario se desconecta durante la sincronización
       const id = usersByTokenHash.get(values[0]);
       return { rows: id ? [{ id, nombre: `User ${id}`, rol: 'admin', zona: '' }] : [] };
     }
-    if (sql.includes('UPDATE chat_messages SET delivered_at')) {
+    if (sql.includes('SELECT id, sender_id FROM chat_messages')) {
       return Number(values[0]) === 51 ? deliveryLookup : { rows: [] };
     }
     throw new Error(`Unexpected query in realtime test: ${sql}`);
@@ -181,24 +181,29 @@ test('mensajes y recibos de lectura se emiten en tiempo real entre usuarios cone
       const id = usersByTokenHash.get(values[0]);
       return { rows: id ? [{ id, nombre: `User ${id}`, rol: 'admin', zona: '' }] : [] };
     }
-    if (sql.includes('WHERE recipient_id = $1 AND delivered_at IS NULL')) {
+    if (sql.includes('SELECT id, sender_id FROM chat_messages')) {
       return { rows: [] };
+    }
+    if (sql.includes('SELECT id FROM chat_messages')) {
+      return { rows: [{ id: message.id }], rowCount: 1 };
     }
     if (sql.includes('SELECT id FROM usuarios')) {
       return { rows: [{ id: Number(values[0]) }], rowCount: 1 };
     }
     if (sql.includes('INSERT INTO chat_messages')) {
-      return { rows: [{ ...message, delivered_at: null, read_at: null }] };
+      return { insertId: message.id, rowCount: 1 };
     }
-    if (sql.includes('WHERE id = $1 AND delivered_at IS NULL')) {
-      return { rows: [{ delivered_at: deliveredAt }], rowCount: 1 };
-    }
-    if (sql.includes('SET delivered_at = COALESCE')) {
-      return { rows: [{ id: message.id }], rowCount: 1 };
+    if (sql.includes('SELECT id, sender_id, recipient_id, content') && sql.includes('WHERE id = $1')) {
+      return { rows: [{ ...message, delivered_at: null, read_at: null }], rowCount: 1 };
     }
     if (sql.includes('SELECT id, sender_id, recipient_id, content')) {
-      return { rows: [{ ...message, read_at: readAt }] };
+      return { rows: [{ ...message, read_at: readAt }], rowCount: 1 };
     }
+    if (sql.includes('SELECT delivered_at FROM chat_messages')) {
+      return { rows: [{ delivered_at: deliveredAt }], rowCount: 1 };
+    }
+    if (sql.includes('SET delivered_at = COALESCE')) return { rows: [], rowCount: 1 };
+    if (sql.includes('SET delivered_at = CURRENT_TIMESTAMP')) return { rows: [], rowCount: 1 };
     throw new Error(`Unexpected query in chat test: ${sql}`);
   });
 

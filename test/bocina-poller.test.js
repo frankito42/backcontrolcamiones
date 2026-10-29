@@ -10,7 +10,6 @@ test('el poller Node reclama, anuncia y limpia una bocina pendiente', async () =
       if (sql.includes('SELECT id, numero, patente')) {
         return { rows: [{ id: 18, numero: 42, patente: 'ab-123 cd' }] };
       }
-      if (sql.includes('RETURNING id')) return { rowCount: 1, rows: [{ id: values[0] }] };
       return { rowCount: 1, rows: [] };
     },
   };
@@ -29,6 +28,6 @@ test('el poller Node reclama, anuncia y limpia una bocina pendiente', async () =
     url: 'http://127.0.0.1:8000/llamar',
     body: { numero: 42, patente: 'AB123CD' },
   }]);
-  assert.equal(statements.filter(({ sql }) => sql.includes('RETURNING id')).length, 1);
+  assert.equal(statements.filter(({ sql }) => sql.includes('SET bocina_procesando=TRUE')).length, 1);
   assert.equal(statements.filter(({ sql }) => sql.includes('bocina_pendiente=FALSE')).length, 1);
 });

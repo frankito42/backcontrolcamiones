@@ -67,7 +67,7 @@ test('persiste el destino elegido al crear una cuenta Aduana', async (context) =
         'secret',
         'aduana',
       ]);
-      return { rows: [{ id: 31 }], rowCount: 1 };
+      return { insertId: 31, rowCount: 1 };
     }
     throw new Error(`Unexpected query: ${sql}`);
   });

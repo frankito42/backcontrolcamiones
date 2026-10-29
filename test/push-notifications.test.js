@@ -64,7 +64,7 @@ test('solo operadores y Defiba pueden registrar dispositivos para notificaciones
   });
   assert.equal(operatorResponse.status, 200);
   assert.equal(statements.length, 1);
-  assert.match(statements[0].sql, /ON CONFLICT \(token\) DO UPDATE/);
+  assert.match(statements[0].sql, /ON DUPLICATE KEY UPDATE/);
   assert.deepEqual(statements[0].values, [
     token,
     14,
@@ -95,8 +95,8 @@ test('el pedido de Aduana se limita a la zona del operador e incluye Defiba para
     async query(sql, values) {
       statements.push({ sql, values });
       if (sql.includes('SELECT d.token')) {
-        assert.match(sql, /LOWER\(BTRIM\(z\.nombre\)\) = LOWER\(BTRIM\(u\.zona\)\)/);
-        assert.match(sql, /LOWER\(BTRIM\(u\.rol\)\) = 'defiba'/);
+        assert.match(sql, /LOWER\(TRIM\(z\.nombre\)\) = LOWER\(TRIM\(u\.zona\)\)/);
+        assert.match(sql, /LOWER\(TRIM\(u\.rol\)\) = 'defiba'/);
         return values[1]
           ? { rows: [{ token: 'defiba-firebase-device-token' }] }
           : { rows: [{ token: 'ruta-11-operator-device-token' }] };

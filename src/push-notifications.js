@@ -57,16 +57,28 @@ export async function ensurePushNotificationSchema(database = pool) {
   await database.query(`
     CREATE TABLE IF NOT EXISTS push_notification_devices (
       token VARCHAR(700) PRIMARY KEY,
-      usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-      session_token_hash CHAR(64) NOT NULL REFERENCES chat_sessions(token_hash) ON DELETE CASCADE,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+      usuario_id INT NOT NULL,
+      session_token_hash CHAR(64) NOT NULL,
+      updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      KEY idx_push_notification_devices_user (usuario_id, session_token_hash),
+      CONSTRAINT fk_push_notification_devices_usuario FOREIGN KEY (usuario_id)
+        REFERENCES usuarios(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT fk_push_notification_devices_session FOREIGN KEY (session_token_hash)
+        REFERENCES chat_sessions(token_hash) ON DELETE CASCADE ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     ALTER TABLE push_notification_devices
-      ADD COLUMN IF NOT EXISTS session_token_hash CHAR(64)
-      REFERENCES chat_sessions(token_hash) ON DELETE CASCADE;
-    CREATE INDEX IF NOT EXISTS idx_push_notification_devices_user
-      ON push_notification_devices (usuario_id, session_token_hash)
+      ADD COLUMN IF NOT EXISTS session_token_hash CHAR(64) NULL
   `);
+  const index = await database.query(
+    `SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'push_notification_devices'
+       AND index_name = 'idx_push_notification_devices_user' LIMIT 1`,
+  );
+  if (!index.rowCount) {
+    await database.query(
+      'CREATE INDEX idx_push_notification_devices_user ON push_notification_devices (usuario_id, session_token_hash)',
+    );
+  }
 }
 
 export function registerPushNotificationRoutes(app, {
@@ -90,9 +102,9 @@ export function registerPushNotificationRoutes(app, {
         `INSERT INTO push_notification_devices
            (token, usuario_id, session_token_hash, updated_at)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-         ON CONFLICT (token) DO UPDATE
-         SET usuario_id = EXCLUDED.usuario_id,
-             session_token_hash = EXCLUDED.session_token_hash,
+         ON DUPLICATE KEY UPDATE
+             usuario_id = VALUES(usuario_id),
+             session_token_hash = VALUES(session_token_hash),
              updated_at = CURRENT_TIMESTAMP`,
         [
           token,
@@ -152,12 +164,12 @@ export function createAduanaPushNotifier(database = pool, {
          INNER JOIN chat_sessions s ON s.token_hash = d.session_token_hash
          WHERE s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
            AND (
-             (LOWER(BTRIM(u.rol)) = 'operador' AND EXISTS (
+             (LOWER(TRIM(u.rol)) = 'operador' AND EXISTS (
                SELECT 1 FROM zonas z
                WHERE z.id = $1
-                 AND LOWER(BTRIM(z.nombre)) = LOWER(BTRIM(u.zona))
+                 AND LOWER(TRIM(z.nombre)) = LOWER(TRIM(u.zona))
              ))
-             OR (LOWER(BTRIM(u.rol)) = 'defiba' AND $2::boolean = TRUE)
+             OR (LOWER(TRIM(u.rol)) = 'defiba' AND $2 = TRUE)
            )`,
         [group.zoneId, group.isDefiba],
       );
@@ -200,9 +212,10 @@ export function createAduanaPushNotifier(database = pool, {
             : []
         ));
         if (invalidTokens.length) {
+          const placeholders = invalidTokens.map((_, index) => `$${index + 1}`).join(', ');
           await database.query(
-            'DELETE FROM push_notification_devices WHERE token = ANY($1::text[])',
-            [invalidTokens],
+            `DELETE FROM push_notification_devices WHERE token IN (${placeholders})`,
+            invalidTokens,
           );
         }
         if (response.failureCount) {

@@ -27,7 +27,7 @@ test('crea un usuario Operador de Pase con el destino asignado', async (context)
       assert.match(sql, /destino_id/);
       assert.equal(values[5], 6);
       assert.equal(values[7], 'pase');
-      return { rows: [{ id: 31 }], rowCount: 1 };
+      return { insertId: 31, rowCount: 1 };
     }
     throw new Error(`Unexpected query: ${sql}`);
   });
@@ -60,7 +60,7 @@ test('actualiza el destino asignado a un usuario Operador de Pase', async (conte
     if (sql.includes('SELECT id, rol, zona FROM usuarios WHERE id')) {
       return { rows: [{ id: 31, rol: 'pase', zona: 'Ruta 86' }], rowCount: 1 };
     }
-    if (sql.includes('SELECT id FROM usuarios WHERE "user"')) {
+    if (sql.includes('SELECT id FROM usuarios WHERE `user`')) {
       return { rows: [], rowCount: 0 };
     }
     if (sql.includes('UPDATE usuarios SET nombre=')) {

@@ -54,3 +54,8 @@ export async function withTransaction(callback) {
     client.release();
   }
 }
+
+export async function lockTurnNumberSequence(client) {
+  const result = await client.query('SELECT id FROM zonas ORDER BY id LIMIT 1 FOR UPDATE');
+  if (!result.rowCount) throw new Error('No hay zonas para bloquear la secuencia de turnos.');
+}

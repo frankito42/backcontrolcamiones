@@ -54,8 +54,8 @@ async function normalizeDefibaTurns() {
       `UPDATE turnos t
        INNER JOIN zonas z ON z.id = t.zona_id
        SET t.origen = 'defiba', t.numero = NULL
-       WHERE LOWER(BTRIM(z.nombre)) = 'defiba'
-         AND (LOWER(BTRIM(COALESCE(t.origen, ''))) <> 'defiba' OR t.numero IS NOT NULL)`,
+       WHERE LOWER(TRIM(z.nombre)) = 'defiba'
+         AND (LOWER(TRIM(COALESCE(t.origen, ''))) <> 'defiba' OR t.numero IS NOT NULL)`,
     );
     if (result.rowCount) console.log(`[defiba] ${result.rowCount} turno(s) normalizados.`);
   } catch (error) {

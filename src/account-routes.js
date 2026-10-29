@@ -27,21 +27,14 @@ const uploadTargets = {
 
 export async function ensureUsuarioSchema() {
   await pool.query(
-    `INSERT INTO roles (slug, nombre) VALUES
+    `INSERT IGNORE INTO roles (slug, nombre) VALUES
       ('admin_aduana', 'Administrador de Aduana'),
       ('admin_defiba', 'Administrador de Defiba'),
-      ('admin_transito', 'Administrador de Tránsito')
-     ON CONFLICT (slug) DO NOTHING`,
+      ('admin_transito', 'Administrador de Tránsito')`,
   );
   await pool.query(`
-    ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
-    ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check
-      CHECK (rol IN ('admin', 'admin_aduana', 'admin_defiba', 'admin_transito', 'operador', 'pase', 'defiba', 'aduana'))
-  `);
-  await pool.query(`
     ALTER TABLE usuarios
-    ADD COLUMN IF NOT EXISTS destino_id INTEGER
-      REFERENCES destinos(id) ON DELETE SET NULL ON UPDATE CASCADE
+    ADD COLUMN IF NOT EXISTS destino_id INT NULL
   `);
   await pool.query(`
     ALTER TABLE usuarios
@@ -50,7 +43,6 @@ export async function ensureUsuarioSchema() {
   await pool.query(`
     ALTER TABLE usuarios
     ADD COLUMN IF NOT EXISTS tema_preferido VARCHAR(30) NOT NULL DEFAULT 'oscuro'
-      CHECK (tema_preferido IN ('oscuro', 'claro', 'azul_marino', 'azul_claro'))
   `);
 }
 
@@ -100,8 +92,10 @@ function integerFields(rows, fields) {
 }
 
 function failDb(res, error, message) {
-  if (error.code === '23505') return fail(res, 'Ya existe un registro con esos datos.', 409);
-  if (error.code === '23503') return fail(res, 'No se puede eliminar porque hay registros asociados.', 409);
+  if (error.code === 'ER_DUP_ENTRY') return fail(res, 'Ya existe un registro con esos datos.', 409);
+  if (error.code === 'ER_NO_REFERENCED_ROW_2' || error.code === 'ER_ROW_IS_REFERENCED_2') {
+    return fail(res, 'No se puede eliminar porque hay registros asociados.', 409);
+  }
   console.error(error);
   return fail(res, message, 500);
 }
@@ -113,11 +107,11 @@ async function login(req, res) {
   if (!user || !pass) return fail(res, 'Usuario y contraseña son obligatorios.', 422);
 
   const result = await pool.query(
-    `SELECT u.id, u.nombre, u."user", u.dni, u.telefono, u.zona, u.destino_id,
+    `SELECT u.id, u.nombre, u.\`user\`, u.dni, u.telefono, u.zona, u.destino_id,
             d.nombre AS destino_nombre, u.rol, u.logo_url, u.fondo_url,
             u.tema_preferido
      FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-     WHERE u."user" = $1 AND u.pass = $2 LIMIT 1`,
+     WHERE u.\`user\` = $1 AND u.pass = $2 LIMIT 1`,
     [user, pass],
   );
   if (!result.rowCount) return fail(res, 'Usuario o contraseña incorrectos.', 401);
@@ -154,7 +148,8 @@ async function camioneros(req, res, authenticate) {
     const result = q
       ? await pool.query(
         `SELECT id, nombre, dni, patente, telefono FROM camioneros
-         WHERE dni ILIKE $1 OR patente ILIKE $1 OR nombre ILIKE $1 ORDER BY nombre ASC`,
+         WHERE LOWER(dni) LIKE LOWER($1) OR LOWER(patente) LIKE LOWER($1)
+           OR LOWER(nombre) LIKE LOWER($1) ORDER BY nombre ASC`,
         [`%${q}%`],
       )
       : await pool.query('SELECT id, nombre, dni, patente, telefono FROM camioneros ORDER BY nombre ASC');
@@ -170,12 +165,12 @@ async function camioneros(req, res, authenticate) {
     try {
       const result = await pool.query(
         `INSERT INTO camioneros (nombre, dni, patente, telefono)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
+         VALUES ($1, $2, $3, $4)`,
         [nombre, dni, patente, telefono],
       );
-      return respond(res, true, 'Camionero registrado.', { id: result.rows[0].id, nombre, dni, patente, telefono }, 201);
+      return respond(res, true, 'Camionero registrado.', { id: result.insertId, nombre, dni, patente, telefono }, 201);
     } catch (error) {
-      if (error.code === '23505') {
+      if (error.code === 'ER_DUP_ENTRY') {
         const existing = await pool.query('SELECT id FROM camioneros WHERE dni = $1 LIMIT 1', [dni]);
         return fail(res, 'Ya existe un camionero con ese DNI.', 409, { id: existing.rows[0]?.id ?? null });
       }
@@ -215,23 +210,23 @@ async function usuarios(req, res, authenticate) {
       const id = positiveInt(req.query.id);
       if (isTransitAdmin) {
         const result = await pool.query(
-          `SELECT u.id, u.nombre, u."user", u.dni, u.telefono, u.zona,
+          `SELECT u.id, u.nombre, u.\`user\`, u.dni, u.telefono, u.zona,
             u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
             u.fondo_url, u.tema_preferido
            FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-           WHERE u.id = $1 AND LOWER(BTRIM(u.rol)) IN ('operador', 'pase')
-             AND LOWER(BTRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')`,
+           WHERE u.id = $1 AND LOWER(TRIM(u.rol)) IN ('operador', 'pase')
+             AND LOWER(TRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')`,
           [id],
         );
         if (!result.rowCount) return fail(res, 'Usuario no encontrado.', 404);
         return respond(res, true, 'Usuario.', result.rows[0]);
       }
       const result = await pool.query(
-        `SELECT u.id, u.nombre, u."user", u.dni, u.telefono, u.zona,
+        `SELECT u.id, u.nombre, u.\`user\`, u.dni, u.telefono, u.zona,
           u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
           u.fondo_url, u.tema_preferido
          FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-         WHERE u.id = $1 AND ($2::varchar IS NULL OR u.rol = $2)`,
+         WHERE u.id = $1 AND ($2 IS NULL OR u.rol = $2)`,
         [id, managedRole],
       );
       if (!result.rowCount) return fail(res, 'Usuario no encontrado.', 404);
@@ -239,22 +234,22 @@ async function usuarios(req, res, authenticate) {
     }
     if (isTransitAdmin) {
       const result = await pool.query(
-        `SELECT u.id, u.nombre, u."user", u.dni, u.telefono, u.zona,
+        `SELECT u.id, u.nombre, u.\`user\`, u.dni, u.telefono, u.zona,
                 u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
                 u.fondo_url, u.tema_preferido
          FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-         WHERE LOWER(BTRIM(u.rol)) IN ('operador', 'pase')
-           AND LOWER(BTRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')
+         WHERE LOWER(TRIM(u.rol)) IN ('operador', 'pase')
+           AND LOWER(TRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')
          ORDER BY u.nombre ASC`,
       );
       return respond(res, true, 'Listado de usuarios.', result.rows);
     }
     const result = await pool.query(
-      `SELECT u.id, u.nombre, u."user", u.dni, u.telefono, u.zona,
+      `SELECT u.id, u.nombre, u.\`user\`, u.dni, u.telefono, u.zona,
               u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
               u.fondo_url, u.tema_preferido
        FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-       WHERE ($1::varchar IS NULL OR u.rol = $1) ORDER BY u.nombre ASC`,
+       WHERE ($1 IS NULL OR u.rol = $1) ORDER BY u.nombre ASC`,
       [managedRole],
     );
     return respond(res, true, 'Listado de usuarios.', result.rows);
@@ -286,14 +281,14 @@ async function usuarios(req, res, authenticate) {
     }
     try {
       const result = await pool.query(
-        `INSERT INTO usuarios (nombre, "user", dni, telefono, zona, destino_id, pass, rol)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        `INSERT INTO usuarios (nombre, \`user\`, dni, telefono, zona, destino_id, pass, rol)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [text(nombre), text(user), text(dni), text(telefono) || null, zona || null,
           ['aduana', 'pase'].includes(rol) ? destinoId : null, pass, rol],
       );
-      return respond(res, true, 'Usuario creado.', { id: result.rows[0].id }, 201);
+      return respond(res, true, 'Usuario creado.', { id: result.insertId }, 201);
     } catch (error) {
-      if (error.code === '23505') return fail(res, 'El nombre de usuario ya está en uso.', 409);
+      if (error.code === 'ER_DUP_ENTRY') return fail(res, 'El nombre de usuario ya está en uso.', 409);
       throw error;
     }
   }
@@ -334,14 +329,14 @@ async function usuarios(req, res, authenticate) {
     if (isTransitAdmin && !isTransitUser(existing.rows[0].rol, existing.rows[0].zona)) {
       return fail(res, 'Solo puedes editar usuarios de Operador o Pase en Ruta 11 o Ruta 86.', 403);
     }
-    const duplicate = await pool.query('SELECT id FROM usuarios WHERE "user" = $1 AND id <> $2', [user, id]);
+    const duplicate = await pool.query('SELECT id FROM usuarios WHERE `user` = $1 AND id <> $2', [user, id]);
     if (duplicate.rowCount) return fail(res, 'El nombre de usuario ya está en uso por otro usuario.', 409);
     const values = [nombre, user, dni, text(req.body.telefono) || null, zona || null,
       ['aduana', 'pase'].includes(rol) ? destinoId : null, rol, id];
     const updateSql = pass
-      ? `UPDATE usuarios SET nombre=$1, "user"=$2, dni=$3, telefono=$4, zona=$5,
+      ? `UPDATE usuarios SET nombre=$1, \`user\`=$2, dni=$3, telefono=$4, zona=$5,
            destino_id=$6, rol=$7, pass=$9 WHERE id=$8`
-      : `UPDATE usuarios SET nombre=$1, "user"=$2, dni=$3, telefono=$4, zona=$5,
+      : `UPDATE usuarios SET nombre=$1, \`user\`=$2, dni=$3, telefono=$4, zona=$5,
            destino_id=$6, rol=$7 WHERE id=$8`;
     if (pass) values.push(pass);
     const result = await pool.query(updateSql, values);
@@ -428,12 +423,12 @@ async function zonas(req, res, authenticate) {
     const nombre = canonicalZoneName(req.body.nombre);
     if (!nombre) return fail(res, 'El nombre de la zona es obligatorio.', 422);
     const duplicate = await pool.query(
-      'SELECT id FROM zonas WHERE LOWER(BTRIM(nombre)) = LOWER(BTRIM($1)) LIMIT 1', [nombre],
+      'SELECT id FROM zonas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) LIMIT 1', [nombre],
     );
     if (duplicate.rowCount) return fail(res, 'Ya existe una zona con ese nombre.', 409);
     try {
-      const result = await pool.query('INSERT INTO zonas (nombre) VALUES ($1) RETURNING id', [nombre]);
-      return respond(res, true, 'Zona creada.', { id: result.rows[0].id, nombre }, 201);
+      const result = await pool.query('INSERT INTO zonas (nombre) VALUES ($1)', [nombre]);
+      return respond(res, true, 'Zona creada.', { id: result.insertId, nombre }, 201);
     } catch (error) {
       return failDb(res, error, 'No se pudo crear la zona.');
     }
@@ -443,7 +438,7 @@ async function zonas(req, res, authenticate) {
     const nombre = canonicalZoneName(req.body.nombre);
     if (!id || !nombre) return fail(res, 'ID y nombre son obligatorios.', 422);
     const duplicate = await pool.query(
-      'SELECT id FROM zonas WHERE LOWER(BTRIM(nombre)) = LOWER(BTRIM($1)) AND id <> $2 LIMIT 1', [nombre, id],
+      'SELECT id FROM zonas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1', [nombre, id],
     );
     if (duplicate.rowCount) return fail(res, 'Ya existe otra zona con ese nombre.', 409);
     try {
@@ -452,7 +447,7 @@ async function zonas(req, res, authenticate) {
         if (!current.rowCount) return null;
         await client.query('UPDATE zonas SET nombre = $1 WHERE id = $2', [nombre, id]);
         await client.query(
-          'UPDATE usuarios SET zona = $1 WHERE LOWER(BTRIM(zona)) = LOWER(BTRIM($2))',
+          'UPDATE usuarios SET zona = $1 WHERE LOWER(TRIM(zona)) = LOWER(TRIM($2))',
           [nombre, current.rows[0].nombre],
         );
         return current.rows[0].nombre;
@@ -471,7 +466,7 @@ async function zonas(req, res, authenticate) {
         const zone = await client.query('SELECT nombre FROM zonas WHERE id = $1 FOR UPDATE', [id]);
         if (!zone.rowCount) return false;
         await client.query(
-          'UPDATE usuarios SET zona = NULL WHERE LOWER(BTRIM(zona)) = LOWER(BTRIM($1))',
+          'UPDATE usuarios SET zona = NULL WHERE LOWER(TRIM(zona)) = LOWER(TRIM($1))',
           [zone.rows[0].nombre],
         );
         await client.query('DELETE FROM zonas WHERE id = $1', [id]);

@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 if not exist .env (
-    echo Falta backend-node\.env. Copia .env.example y completa DATABASE_URL.
+    echo Falta backend-node\.env. Copia .env.example y completa MYSQL_*.
     pause
     exit /b 1
 )

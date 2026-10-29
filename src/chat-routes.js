@@ -25,7 +25,7 @@ export function registerChatRoutes(app) {
         `SELECT u.id, u.nombre, u.rol, u.zona,
                 (SELECT COUNT(*) FROM chat_messages unread
                  WHERE unread.sender_id = u.id AND unread.recipient_id = $1
-                   AND unread.read_at IS NULL)::int AS unread_count,
+                   AND unread.read_at IS NULL) AS unread_count,
                 recent.id AS last_message_id, recent.sender_id AS last_sender_id,
                 recent.content AS last_message, recent.created_at AS last_message_at,
                 recent.delivered_at AS last_delivered_at, recent.read_at AS last_read_at
@@ -56,12 +56,17 @@ export function registerChatRoutes(app) {
       if (!peerId || peerId === Number(req.chatUser.id)) return fail(res, 'Contacto inválido.', 422);
 
       const read = await pool.query(
-        `UPDATE chat_messages SET delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
-           read_at = CURRENT_TIMESTAMP
-         WHERE sender_id = $1 AND recipient_id = $2 AND read_at IS NULL RETURNING id`,
+        `SELECT id FROM chat_messages
+         WHERE sender_id = $1 AND recipient_id = $2 AND read_at IS NULL`,
         [peerId, req.chatUser.id],
       );
       if (read.rowCount) {
+        await pool.query(
+          `UPDATE chat_messages SET delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
+             read_at = CURRENT_TIMESTAMP
+           WHERE sender_id = $1 AND recipient_id = $2 AND read_at IS NULL`,
+          [peerId, req.chatUser.id],
+        );
         emitChatToUser(peerId, 'chat.read', {
           reader_id: req.chatUser.id,
           message_ids: read.rows.map((message) => Number(message.id)),
@@ -72,7 +77,7 @@ export function registerChatRoutes(app) {
         `SELECT id, sender_id, recipient_id, content, created_at, delivered_at, read_at
          FROM chat_messages
          WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
-           AND ($3::bigint IS NULL OR id < $3)
+           AND ($3 IS NULL OR id < $3)
          ORDER BY id DESC LIMIT $4`,
         [req.chatUser.id, peerId, beforeId, limit],
       );
@@ -95,18 +100,22 @@ export function registerChatRoutes(app) {
 
       const result = await pool.query(
         `INSERT INTO chat_messages (sender_id, recipient_id, content)
-         VALUES ($1, $2, $3)
-         RETURNING id, sender_id, recipient_id, content, created_at, delivered_at, read_at`,
+         VALUES ($1, $2, $3)`,
         [req.chatUser.id, recipientId, content],
       );
-      const message = result.rows[0];
+      const inserted = await pool.query(
+        `SELECT id, sender_id, recipient_id, content, created_at, delivered_at, read_at
+         FROM chat_messages WHERE id = $1`,
+        [result.insertId],
+      );
+      const message = inserted.rows[0];
       if (isChatUserOnline(recipientId)) {
-        const delivered = await pool.query(
+        await pool.query(
           `UPDATE chat_messages SET delivered_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND delivered_at IS NULL
-           RETURNING delivered_at`,
+           WHERE id = $1 AND delivered_at IS NULL`,
           [message.id],
         );
+        const delivered = await pool.query('SELECT delivered_at FROM chat_messages WHERE id = $1', [message.id]);
         message.delivered_at = delivered.rows[0]?.delivered_at ?? message.delivered_at;
         emitChatToUser(recipientId, 'chat.message', message);
       }

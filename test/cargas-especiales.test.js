@@ -25,6 +25,9 @@ test('la carga especial se guarda sin turno y empieza en camino', async (context
     if (sql.includes('FROM destinos')) return { rows: [{ id: 4 }], rowCount: 1 };
     if (sql.includes('INSERT INTO cargas_especiales')) {
       assert.deepEqual(values, ['ABC123', 8, 4, 21]);
+      return { insertId: 33, rowCount: 1 };
+    }
+    if (sql.includes('FROM cargas_especiales WHERE id = $1')) {
       return {
         rows: [{ id: 33, patente: 'ABC123', zona_id: 8, destino_id: 4, estado: 'en_camino', usuario_id: 21 }],
         rowCount: 1,
@@ -70,9 +73,12 @@ test('el listado de cargas especiales limita al destino y solo trae las que sigu
 test('finalizar cambia el estado de la carga especial', async (context) => {
   context.mock.method(pool, 'query', async (query, values = []) => {
     const sql = typeof query === 'string' ? query : query.text;
-    assert.match(sql, /SET estado = 'finalizado'/);
     assert.deepEqual(values, [33]);
-    return { rows: [{ id: 33, estado: 'finalizado' }], rowCount: 1 };
+    if (sql.includes("SET estado = 'finalizado'")) return { rows: [], rowCount: 1 };
+    if (sql.includes('SELECT id, estado FROM cargas_especiales')) {
+      return { rows: [{ id: 33, estado: 'finalizado' }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${sql}`);
   });
   const baseUrl = await startApp(context);
 

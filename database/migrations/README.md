@@ -1,8 +1,8 @@
 # Migraciones de base de datos
 
 Esta carpeta contiene los volcados MySQL para Hostinger. El backend Node activo
-usa MySQL/MariaDB; PostgreSQL queda como origen histórico para exportaciones.
-El volcado se importa manualmente y no se ejecuta al iniciar el servidor.
+usa únicamente MySQL/MariaDB. El volcado se importa manualmente y no se ejecuta
+al iniciar el servidor.
 
 ## Convenciones
 
@@ -18,10 +18,6 @@ El volcado se importa manualmente y no se ejecuta al iniciar el servidor.
 - No aplicar automáticamente estos archivos al iniciar el servidor. Se ejecutan
   únicamente cuando se solicite la migración correspondiente.
 
-El script `npm run db:export:mysql` genera un volcado completo de las tablas
-activas de la aplicación en PostgreSQL y todos sus datos en
-`exports/turnos_camiones_hostinger.sql`. Antes de exportar, comprueba que no haya
-tablas públicas adicionales sin definición para evitar un volcado incompleto.
-Ese archivo puede contener información personal, contraseñas y tokens; está
+El archivo de exportación contiene datos personales, contraseñas y tokens; está
 excluido de Git y debe tratarse como sensible. Importarlo únicamente en una base
-MySQL vacía. La exportación no se conecta ni escribe en la base MySQL destino.
+MySQL vacía.

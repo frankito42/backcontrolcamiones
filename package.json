@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test",
-    "db:export:mysql": "node scripts/export-postgres-tables-to-mysql.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
@@ -20,7 +19,6 @@
     "firebase-admin": "^14.5.0",
     "multer": "^2.0.2",
     "mysql2": "^3.14.5",
-    "pg": "^8.16.3",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {

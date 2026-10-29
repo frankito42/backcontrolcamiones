@@ -12,7 +12,7 @@ try {
   assertDatabaseConfig();
   await pool.query(schema);
   await seedReferenceData(pool);
-  console.log('Esquema PostgreSQL aplicado.');
+  console.log('Esquema MySQL aplicado.');
 } catch (error) {
   console.error('No se pudo aplicar el esquema:', error.message);
   process.exitCode = 1;

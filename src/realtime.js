@@ -53,14 +53,20 @@ async function connectChatSocket(socket) {
   });
 
   try {
-    const delivered = await pool.query(
-      `UPDATE chat_messages SET delivered_at = CURRENT_TIMESTAMP
-       WHERE recipient_id = $1 AND delivered_at IS NULL
-       RETURNING id, sender_id`,
+    const pending = await pool.query(
+      `SELECT id, sender_id FROM chat_messages
+       WHERE recipient_id = $1 AND delivered_at IS NULL`,
       [userId],
     );
+    if (pending.rowCount) {
+      await pool.query(
+      `UPDATE chat_messages SET delivered_at = CURRENT_TIMESTAMP
+       WHERE recipient_id = $1 AND delivered_at IS NULL`,
+        [userId],
+      );
+    }
     const senders = new Map();
-    for (const row of delivered.rows) {
+    for (const row of pending.rows) {
       const senderId = Number(row.sender_id);
       const ids = senders.get(senderId) || [];
       ids.push(Number(row.id));

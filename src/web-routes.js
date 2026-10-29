@@ -116,7 +116,7 @@ export function registerWebRoutes(app) {
   const getConfiguration = async () => {
     const [usersResult, rolesResult, zonesResult, destinationsResult] = await Promise.all([
       pool.query(
-        `SELECT u.nombre, u."user" AS usuario, u.rol, u.zona, d.nombre AS destino
+        `SELECT u.nombre, u.\`user\` AS usuario, u.rol, u.zona, d.nombre AS destino
          FROM usuarios u
          LEFT JOIN destinos d ON d.id = u.destino_id
          ORDER BY LOWER(u.rol), LOWER(COALESCE(u.zona, '')), LOWER(u.nombre)`,

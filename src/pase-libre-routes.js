@@ -6,10 +6,14 @@ import { authenticateChatToken } from './chat-auth.js';
 export async function ensurePaseLibreSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pase_libre_destinos (
-      destino_id INTEGER PRIMARY KEY REFERENCES destinos(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      activo BOOLEAN NOT NULL DEFAULT FALSE,
-      actualizado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-      actualizado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      destino_id INT PRIMARY KEY,
+      activo TINYINT(1) NOT NULL DEFAULT 0,
+      actualizado_por INT NULL,
+      actualizado_en DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      CONSTRAINT fk_pase_libre_destinos_destino FOREIGN KEY (destino_id)
+        REFERENCES destinos(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT fk_pase_libre_destinos_usuario FOREIGN KEY (actualizado_por)
+        REFERENCES usuarios(id) ON DELETE SET NULL ON UPDATE CASCADE
     )
   `);
 }
@@ -94,8 +98,8 @@ export function registerPaseLibreRoutes(app, { authenticate = authenticateChatTo
       await pool.query(
         `INSERT INTO pase_libre_destinos (destino_id, activo, actualizado_por, actualizado_en)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-         ON CONFLICT (destino_id) DO UPDATE
-         SET activo = EXCLUDED.activo, actualizado_por = EXCLUDED.actualizado_por,
+         ON DUPLICATE KEY UPDATE
+         activo = VALUES(activo), actualizado_por = VALUES(actualizado_por),
              actualizado_en = CURRENT_TIMESTAMP`,
         [destinoId, req.body.activo, usuarioId],
       );

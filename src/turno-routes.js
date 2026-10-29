@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { pool, withTransaction } from './db.js';
+import { lockTurnNumberSequence, pool, withTransaction } from './db.js';
 import { fail, methodNotAllowed, positiveInt, respond } from './helpers.js';
 import {
   emitAduanaTurnosChanged,
@@ -12,7 +12,7 @@ import { authenticateChatToken } from './chat-auth.js';
 const activeStates = ['reservado', 'pendiente', 'en_curso'];
 const validStates = ['reservado', 'pendiente', 'en_curso', 'listo_para_salir', 'finalizado', 'anulado'];
 const validPriorities = ['baja', 'media', 'alta'];
-const defibaTurnSql = "(LOWER(BTRIM(COALESCE(t.origen, ''))) = 'defiba' OR LOWER(BTRIM(z.nombre)) = 'defiba')";
+const defibaTurnSql = "(LOWER(TRIM(COALESCE(t.origen, ''))) = 'defiba' OR LOWER(TRIM(z.nombre)) = 'defiba')";
 const turnSelect = `
   SELECT t.id, t.numero, t.origen, t.numero_operacion, t.prioridad, t.zona_id, t.destino_id,
          t.aduana_confirmado, t.aduana_confirmado_en, t.estado_aduana,
@@ -103,7 +103,7 @@ async function notifyWhatsApp(turno) {
     const body = new URLSearchParams({ From: TWILIO_WHATSAPP_FROM, To: to });
     if (process.env.TWILIO_WHATSAPP_TEMPLATE_SID) {
       const ahead = await pool.query(
-        `SELECT COUNT(*)::int AS cantidad FROM turnos
+        `SELECT COUNT(*) AS cantidad FROM turnos
          WHERE estado IN ('pendiente', 'en_curso') AND numero < $1`,
         [turno.numero],
       );
@@ -142,7 +142,7 @@ async function listTurns(req, res) {
   }
   if (positiveInt(req.query.zona_id)) add('t.zona_id = ?', positiveInt(req.query.zona_id));
   if (clean(req.query.zona)) {
-    add('LOWER(BTRIM(z.nombre)) = ?', clean(req.query.zona).toLowerCase());
+    add('LOWER(TRIM(z.nombre)) = ?', clean(req.query.zona).toLowerCase());
   }
   if (req.query.aduana_confirmado === '1') {
     conditions.push("t.aduana_confirmado = TRUE AND t.estado NOT IN ('finalizado', 'anulado')");
@@ -152,14 +152,14 @@ async function listTurns(req, res) {
   }
   const origin = clean(req.query.origen).toLowerCase();
   if (origin === 'defiba') {
-    conditions.push("(LOWER(BTRIM(t.origen)) = 'defiba' OR LOWER(BTRIM(z.nombre)) = 'defiba')");
+    conditions.push("(LOWER(TRIM(t.origen)) = 'defiba' OR LOWER(TRIM(z.nombre)) = 'defiba')");
   } else if (origin) {
-    add('LOWER(BTRIM(t.origen)) = ?', origin);
+    add('LOWER(TRIM(t.origen)) = ?', origin);
   }
   if (req.query.aduana_visible === '1') {
     conditions.push(
       `((${defibaTurnSql} AND (t.estado = 'listo_para_salir' OR (t.estado = 'en_curso' AND t.aduana_confirmado = TRUE)))
-        OR (NOT ${defibaTurnSql} AND LOWER(BTRIM(t.estado)) NOT IN ('pendiente', 'llegando', 'finalizado', 'anulado')))`,
+        OR (NOT ${defibaTurnSql} AND LOWER(TRIM(t.estado)) NOT IN ('pendiente', 'llegando', 'finalizado', 'anulado')))`,
     );
   }
   if (req.scopedAdmin?.rol === 'admin_aduana') {
@@ -167,7 +167,7 @@ async function listTurns(req, res) {
       `((${defibaTurnSql} AND (t.estado = 'listo_para_salir'
           OR (t.estado = 'en_curso' AND t.aduana_confirmado = TRUE)))
         OR (NOT ${defibaTurnSql}
-          AND LOWER(BTRIM(t.estado)) NOT IN ('pendiente', 'llegando', 'finalizado', 'anulado')))`,
+          AND LOWER(TRIM(t.estado)) NOT IN ('pendiente', 'llegando', 'finalizado', 'anulado')))`,
     );
   }
   if (req.scopedAdmin?.rol === 'admin_defiba') {
@@ -215,10 +215,10 @@ async function createTurn(req, res) {
           phone ||= existing.rows[0].telefono || '';
         } else {
           const inserted = await client.query(
-            `INSERT INTO camioneros (nombre, dni, patente, telefono) VALUES ($1, $2, $3, $4) RETURNING id`,
+            `INSERT INTO camioneros (nombre, dni, patente, telefono) VALUES ($1, $2, $3, $4)`,
             [driverName, dni, plate, phone || null],
           );
-          driverId = inserted.rows[0].id;
+          driverId = inserted.insertId;
         }
       } else {
         const driver = await client.query('SELECT patente, telefono FROM camioneros WHERE id = $1', [driverId]);
@@ -230,14 +230,14 @@ async function createTurn(req, res) {
 
       if (!zoneId && user.rows[0]?.zona) {
         const zone = await client.query(
-          'SELECT id FROM zonas WHERE LOWER(BTRIM(nombre)) = LOWER(BTRIM($1)) ORDER BY id LIMIT 1',
+          'SELECT id FROM zonas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) ORDER BY id LIMIT 1',
           [user.rows[0].zona],
         );
         zoneId = zone.rows[0]?.id || 0;
       }
       if (!zoneId && isDefibaRole(user.rows[0]?.rol)) {
         const defibaZone = await client.query(
-          "SELECT id FROM zonas WHERE LOWER(BTRIM(nombre)) = 'defiba' ORDER BY id LIMIT 1",
+          "SELECT id FROM zonas WHERE LOWER(TRIM(nombre)) = 'defiba' ORDER BY id LIMIT 1",
         );
         zoneId = defibaZone.rows[0]?.id || 0;
       }
@@ -254,7 +254,7 @@ async function createTurn(req, res) {
       if (priority && !validPriorities.includes(priority)) throw Object.assign(new Error('Prioridad inválida.'), { httpStatus: 422 });
 
       const active = await client.query(
-        'SELECT id, patente FROM turnos WHERE camionero_id = $1 AND estado = ANY($2::varchar[])',
+        'SELECT id, patente FROM turnos WHERE camionero_id = $1 AND estado IN ($2)',
         [driverId, activeStates],
       );
       const conflicting = active.rows.find((row) => row.patente.toUpperCase() !== plate);
@@ -269,7 +269,7 @@ async function createTurn(req, res) {
       const initialState = isDefiba ? 'reservado' : 'pendiente';
       let number = null;
       if (origin !== 'defiba') {
-        await client.query("SELECT pg_advisory_xact_lock(hashtext('turnos-global-number'))");
+        await lockTurnNumberSequence(client);
         const latest = await client.query('SELECT COALESCE(MAX(numero), 0) + 1 AS numero FROM turnos');
         number = latest.rows[0].numero;
       }
@@ -278,10 +278,14 @@ async function createTurn(req, res) {
           (numero, camionero_id, patente, empresa, mercaderia, mercaderia_vacia, fecha_ingreso, hora_ingreso, estado, origen,
            usuario_id, zona_id, destino_id, prioridad)
          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE, LOCALTIME, $7, $8, $9, $10, $11, $12)
-         RETURNING id, numero, fecha_ingreso, hora_ingreso`,
+        `,
         [number, driverId, plate, company || null, merchandise || null, merchandiseEmpty, initialState, origin, userId, zoneId, destinationId, priority],
       );
-      const turn = result.rows[0];
+      const savedTurn = await client.query(
+        'SELECT id, numero, fecha_ingreso, hora_ingreso FROM turnos WHERE id = $1',
+        [result.insertId],
+      );
+      const turn = savedTurn.rows[0];
       await history(client, turn.id, zoneId, initialState, userId, 'app');
       return {
         ...turn,
@@ -313,7 +317,7 @@ async function createTurn(req, res) {
     }, 201);
   } catch (error) {
     if (error.httpStatus) return fail(res, error.message, error.httpStatus, error.responseData || null);
-    if (error.code === '23505') return fail(res, 'Ya existe un turno con ese número en esta zona.', 409);
+    if (error.code === 'ER_DUP_ENTRY') return fail(res, 'Ya existe un turno con ese número en esta zona.', 409);
     console.error(error);
     return fail(res, 'No se pudo crear el turno.', 500);
   }
@@ -321,16 +325,21 @@ async function createTurn(req, res) {
 
 async function confirmAduana(ids, userId) {
   return withTransaction(async (client) => {
+    const candidates = await client.query(
+      `SELECT id, zona_id, estado, numero, patente FROM turnos
+       WHERE id IN ($1) AND estado NOT IN ('finalizado', 'anulado')
+       FOR UPDATE`,
+      [ids],
+    );
     const updated = await client.query(
       `UPDATE turnos SET aduana_confirmado = TRUE, aduana_confirmado_en = CURRENT_TIMESTAMP,
          estado_aduana = 'solicitando', defiba_aviso_confirmado = FALSE,
          operador_aduana_aviso_confirmado = FALSE
-       WHERE id = ANY($1::int[]) AND estado NOT IN ('finalizado', 'anulado')
-       RETURNING id, zona_id, estado, numero, patente`,
+       WHERE id IN ($1) AND estado NOT IN ('finalizado', 'anulado')`,
       [ids],
     );
     let added = 0;
-    for (const turn of updated.rows) {
+    for (const turn of candidates.rows) {
       const existing = await client.query(
         "SELECT 1 FROM turno_historial WHERE turno_id = $1 AND evento = 'lista_aduana' LIMIT 1",
         [turn.id],
@@ -340,20 +349,21 @@ async function confirmAduana(ids, userId) {
         added += 1;
       }
     }
-    const defibaRows = updated.rowCount
+    const updatedIds = candidates.rows.map((turn) => turn.id);
+    const defibaRows = updatedIds.length
       ? await client.query(
         `SELECT t.id FROM turnos t INNER JOIN zonas z ON z.id = t.zona_id
-         WHERE t.id = ANY($1::int[])
-           AND (LOWER(BTRIM(t.origen)) = 'defiba' OR LOWER(BTRIM(z.nombre)) = 'defiba')`,
-        [updated.rows.map((turn) => turn.id)],
+         WHERE t.id IN ($1)
+           AND (LOWER(TRIM(t.origen)) = 'defiba' OR LOWER(TRIM(z.nombre)) = 'defiba')`,
+        [updatedIds],
       )
       : { rows: [] };
-    const notificationTurns = updated.rowCount
+    const notificationTurns = updatedIds.length
       ? await client.query(
         `SELECT t.id, t.zona_id, t.numero, t.patente, t.origen, z.nombre AS zona_nombre
          FROM turnos t INNER JOIN zonas z ON z.id = t.zona_id
-         WHERE t.id = ANY($1::int[])`,
-        [updated.rows.map((turn) => turn.id)],
+         WHERE t.id IN ($1)`,
+        [updatedIds],
       )
       : { rows: [] };
     return {
@@ -365,22 +375,24 @@ async function confirmAduana(ids, userId) {
 }
 
 async function updateBatchAction(action, ids) {
-  const idsSql = '$1::int[]';
+  const idsSql = '$1';
   if (action === 'confirmar_aviso_defiba') {
     const result = await pool.query(
-      `UPDATE turnos t SET defiba_aviso_confirmado = TRUE,
+      `UPDATE turnos t INNER JOIN zonas z ON z.id = t.zona_id
+       SET defiba_aviso_confirmado = TRUE,
          estado_aduana = CASE WHEN t.estado_aduana = 'en_camino' THEN 'en_camino' ELSE 'recibido' END
-       FROM zonas z WHERE z.id = t.zona_id AND t.id = ANY(${idsSql})
-         AND (LOWER(BTRIM(t.origen)) = 'defiba' OR LOWER(BTRIM(z.nombre)) = 'defiba')
+       WHERE t.id IN (${idsSql})
+         AND (LOWER(TRIM(t.origen)) = 'defiba' OR LOWER(TRIM(z.nombre)) = 'defiba')
          AND t.aduana_confirmado = TRUE`, [ids],
     );
     return ['Pedido de Aduana recibido.', result.rowCount];
   }
   if (action === 'confirmar_aviso_operador_aduana') {
     const result = await pool.query(
-      `UPDATE turnos t SET operador_aduana_aviso_confirmado = TRUE,
+      `UPDATE turnos t INNER JOIN zonas z ON z.id = t.zona_id
+       SET operador_aduana_aviso_confirmado = TRUE,
          estado_aduana = CASE WHEN t.estado_aduana = 'en_camino' THEN 'en_camino' ELSE 'recibido' END
-       FROM zonas z WHERE z.id = t.zona_id AND t.id = ANY(${idsSql})
+       WHERE t.id IN (${idsSql})
          AND t.aduana_confirmado = TRUE AND LOWER(TRIM(z.nombre)) IN ('ruta 11', 'ruta 86')`, [ids],
     );
     return ['Aviso de Aduana confirmado.', result.rowCount];
@@ -389,7 +401,7 @@ async function updateBatchAction(action, ids) {
     const result = await pool.query(
       `UPDATE turnos SET bocina_pendiente = TRUE, bocina_pendiente_en = CURRENT_TIMESTAMP,
         bocina_procesando = FALSE, bocina_reclamada_en = NULL
-       WHERE id = ANY(${idsSql}) AND aduana_confirmado = TRUE
+       WHERE id IN (${idsSql}) AND aduana_confirmado = TRUE
          AND estado NOT IN ('finalizado', 'anulado')`, [ids],
     );
     return ['Bocina registrada para los turnos seleccionados.', result.rowCount];
@@ -406,7 +418,7 @@ async function manageAduanaRequest(action, turnId, userId) {
        INNER JOIN turnos t ON t.id = $2
        INNER JOIN zonas z ON z.id = t.zona_id
        WHERE u.id = $1
-       FOR UPDATE OF t`,
+       FOR UPDATE`,
       [userId, turnId],
     );
     if (!selected.rowCount) {
@@ -532,7 +544,7 @@ async function updateTurn(req, res) {
       const selected = await pool.query(
         `SELECT t.estado, t.origen, t.aduana_confirmado, z.nombre AS zona_nombre
          FROM turnos t INNER JOIN zonas z ON z.id = t.zona_id
-         WHERE t.id = ANY($1::int[])`,
+         WHERE t.id IN ($1)`,
         [ids],
       );
       if (selected.rowCount !== new Set(ids).size
@@ -621,13 +633,13 @@ async function updateTurn(req, res) {
     if (['reservado', 'en_curso', 'listo_para_salir'].includes(state) && userId) {
       const user = await client.query(
         `SELECT u.rol, z.id FROM usuarios u
-         LEFT JOIN zonas z ON LOWER(BTRIM(z.nombre)) = LOWER(BTRIM(u.zona))
+         LEFT JOIN zonas z ON LOWER(TRIM(z.nombre)) = LOWER(TRIM(u.zona))
          WHERE u.id = $1 ORDER BY z.id LIMIT 1`, [userId],
       );
       zoneId = user.rows[0]?.id || null;
       role = user.rows[0]?.rol || null;
       if (!zoneId && isDefibaRole(role)) {
-        const defiba = await client.query("SELECT id FROM zonas WHERE LOWER(BTRIM(nombre)) = 'defiba' ORDER BY id LIMIT 1");
+        const defiba = await client.query("SELECT id FROM zonas WHERE LOWER(TRIM(nombre)) = 'defiba' ORDER BY id LIMIT 1");
         zoneId = defiba.rows[0]?.id || null;
       }
       if (!zoneId && !['admin', 'defiba', 'admin_defiba'].includes(role)) {
@@ -656,9 +668,9 @@ async function updateTurn(req, res) {
              estado_aduana=CASE WHEN $3 AND aduana_confirmado THEN 'en_camino' ELSE estado_aduana END,
              destino_id=COALESCE($4,destino_id), empresa=COALESCE(NULLIF($5,''),empresa),
              numero_operacion=COALESCE(NULLIF($6,''),numero_operacion), prioridad=COALESCE(NULLIF($7,''),prioridad),
-             mercaderia=CASE WHEN $10::boolean IS TRUE THEN NULL
+             mercaderia=CASE WHEN $10 = TRUE THEN NULL
                WHEN NULLIF($8,'') IS NOT NULL THEN $8 ELSE mercaderia END,
-             mercaderia_vacia=COALESCE($10::boolean,mercaderia_vacia), zona_id=$11
+             mercaderia_vacia=COALESCE($10,mercaderia_vacia), zona_id=$11
            WHERE id=$9`, values,
         );
         turnBefore.zona_id = zoneId;
@@ -668,9 +680,9 @@ async function updateTurn(req, res) {
              estado_aduana=CASE WHEN $3 AND aduana_confirmado THEN 'en_camino' ELSE estado_aduana END,
              destino_id=COALESCE($4,destino_id), empresa=COALESCE(NULLIF($5,''),empresa),
              numero_operacion=COALESCE(NULLIF($6,''),numero_operacion), prioridad=COALESCE(NULLIF($7,''),prioridad),
-             mercaderia=CASE WHEN $10::boolean IS TRUE THEN NULL
+             mercaderia=CASE WHEN $10 = TRUE THEN NULL
                WHEN NULLIF($8,'') IS NOT NULL THEN $8 ELSE mercaderia END,
-             mercaderia_vacia=COALESCE($10::boolean,mercaderia_vacia)
+             mercaderia_vacia=COALESCE($10,mercaderia_vacia)
            WHERE id=$9`, values,
         );
       }
@@ -746,15 +758,15 @@ async function transitoDashboard(req, res, authenticate) {
   }
 
   const result = await pool.query(
-    `SELECT rutas.nombre AS zona_nombre, COUNT(t.id)::int AS cantidad
+    `SELECT rutas.nombre AS zona_nombre, COUNT(t.id) AS cantidad
      FROM (
        SELECT 'Ruta 11' AS nombre, 1 AS orden
        UNION ALL
        SELECT 'Ruta 86' AS nombre, 2 AS orden
      ) AS rutas
-     LEFT JOIN zonas z ON LOWER(BTRIM(z.nombre)) = LOWER(rutas.nombre)
+     LEFT JOIN zonas z ON LOWER(TRIM(z.nombre)) = LOWER(rutas.nombre)
      LEFT JOIN turnos t ON t.zona_id = z.id
-       AND LOWER(BTRIM(t.estado)) = 'reservado'
+       AND LOWER(TRIM(t.estado)) = 'reservado'
        AND t.aduana_confirmado = FALSE
      GROUP BY rutas.nombre, rutas.orden
      ORDER BY rutas.orden`,
@@ -825,13 +837,13 @@ async function aduanaFinalizados(req, res, authenticate) {
   const desde = clean(req.query.desde);
   if (desde) {
     if (!validIsoDate(desde)) return fail(res, 'La fecha inicial no es válida.', 422);
-    add(`${finalizedAtWithFallback} >= ?::date`, desde);
+    add(`${finalizedAtWithFallback} >= ?`, desde);
   }
   const hasta = clean(req.query.hasta);
   if (hasta) {
     if (!validIsoDate(hasta)) return fail(res, 'La fecha final no es válida.', 422);
     add(
-      `${finalizedAtWithFallback} < (?::date + INTERVAL '1 day')`,
+      `${finalizedAtWithFallback} < DATE_ADD(?, INTERVAL 1 DAY)`,
       hasta,
     );
   }
@@ -888,12 +900,12 @@ async function defibaIngresos(req, res, authenticate) {
   const desde = clean(req.query.desde);
   if (desde) {
     if (!validIsoDate(desde)) return fail(res, 'La fecha inicial no es válida.', 422);
-    add('t.fecha_ingreso >= ?::date', desde);
+    add('t.fecha_ingreso >= ?', desde);
   }
   const hasta = clean(req.query.hasta);
   if (hasta) {
     if (!validIsoDate(hasta)) return fail(res, 'La fecha final no es válida.', 422);
-    add("t.fecha_ingreso < (?::date + INTERVAL '1 day')", hasta);
+    add('t.fecha_ingreso < DATE_ADD(?, INTERVAL 1 DAY)', hasta);
   }
   if (desde && hasta && desde > hasta) {
     return fail(res, 'La fecha inicial no puede ser posterior a la fecha final.', 422);
