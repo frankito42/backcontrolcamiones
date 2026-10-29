@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   logo_url VARCHAR(500) NULL,
   fondo_url VARCHAR(500) NULL,
   tema_preferido VARCHAR(30) NOT NULL DEFAULT 'oscuro',
+  activo TINYINT(1) NOT NULL DEFAULT 1,
   creado_en DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uq_usuarios_user (`user`),

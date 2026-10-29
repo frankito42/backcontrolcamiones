@@ -53,6 +53,7 @@ export async function authenticateChatToken(token) {
     `SELECT u.id, u.nombre, u.rol, u.zona
      FROM chat_sessions s INNER JOIN usuarios u ON u.id = s.usuario_id
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+       AND u.activo = 1
      LIMIT 1`,
     [tokenHash],
   );

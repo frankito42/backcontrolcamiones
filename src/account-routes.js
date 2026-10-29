@@ -44,6 +44,10 @@ export async function ensureUsuarioSchema() {
     ALTER TABLE usuarios
     ADD COLUMN IF NOT EXISTS tema_preferido VARCHAR(30) NOT NULL DEFAULT 'oscuro'
   `);
+  await pool.query(`
+    ALTER TABLE usuarios
+    ADD COLUMN IF NOT EXISTS activo TINYINT(1) NOT NULL DEFAULT 1
+  `);
 }
 
 function methodOf(req) {
@@ -111,7 +115,7 @@ async function login(req, res) {
             d.nombre AS destino_nombre, u.rol, u.logo_url, u.fondo_url,
             u.tema_preferido
      FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-     WHERE u.\`user\` = $1 AND u.pass = $2 LIMIT 1`,
+     WHERE u.\`user\` = $1 AND u.pass = $2 AND u.activo = 1 LIMIT 1`,
     [user, pass],
   );
   if (!result.rowCount) return fail(res, 'Usuario o contraseña incorrectos.', 401);
@@ -214,7 +218,8 @@ async function usuarios(req, res, authenticate) {
             u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
             u.fondo_url, u.tema_preferido
            FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-           WHERE u.id = $1 AND LOWER(TRIM(u.rol)) IN ('operador', 'pase')
+           WHERE u.id = $1 AND u.activo = 1
+             AND LOWER(TRIM(u.rol)) IN ('operador', 'pase')
              AND LOWER(TRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')`,
           [id],
         );
@@ -226,7 +231,7 @@ async function usuarios(req, res, authenticate) {
           u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
           u.fondo_url, u.tema_preferido
          FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-         WHERE u.id = $1 AND ($2 IS NULL OR u.rol = $2)`,
+         WHERE u.id = $1 AND u.activo = 1 AND ($2 IS NULL OR u.rol = $2)`,
         [id, managedRole],
       );
       if (!result.rowCount) return fail(res, 'Usuario no encontrado.', 404);
@@ -238,7 +243,7 @@ async function usuarios(req, res, authenticate) {
                 u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
                 u.fondo_url, u.tema_preferido
          FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-         WHERE LOWER(TRIM(u.rol)) IN ('operador', 'pase')
+         WHERE u.activo = 1 AND LOWER(TRIM(u.rol)) IN ('operador', 'pase')
            AND LOWER(TRIM(COALESCE(u.zona, ''))) IN ('ruta 11', 'ruta 86')
          ORDER BY u.nombre ASC`,
       );
@@ -249,7 +254,7 @@ async function usuarios(req, res, authenticate) {
               u.destino_id, d.nombre AS destino_nombre, u.rol, u.logo_url,
               u.fondo_url, u.tema_preferido
        FROM usuarios u LEFT JOIN destinos d ON d.id = u.destino_id
-       WHERE ($1 IS NULL OR u.rol = $1) ORDER BY u.nombre ASC`,
+       WHERE u.activo = 1 AND ($1 IS NULL OR u.rol = $1) ORDER BY u.nombre ASC`,
       [managedRole],
     );
     return respond(res, true, 'Listado de usuarios.', result.rows);
@@ -321,7 +326,10 @@ async function usuarios(req, res, authenticate) {
       const destino = await pool.query('SELECT id FROM destinos WHERE id = $1', [destinoId]);
       if (!destino.rowCount) return fail(res, 'Destino inválido.', 422);
     }
-    const existing = await pool.query('SELECT id, rol, zona FROM usuarios WHERE id = $1', [id]);
+    const existing = await pool.query(
+      'SELECT id, rol, zona FROM usuarios WHERE id = $1 AND activo = 1',
+      [id],
+    );
     if (!existing.rowCount) return fail(res, 'Usuario no encontrado.', 404);
     if (managedRole && existing.rows[0].rol !== managedRole) {
       return fail(res, 'Solo puedes editar usuarios del área que administras.', 403);
@@ -343,7 +351,64 @@ async function usuarios(req, res, authenticate) {
     if (!result.rowCount) return fail(res, 'Usuario no encontrado.', 404);
     return respond(res, true, 'Usuario actualizado.', { id });
   }
-  return methodNotAllowed(res, ['GET', 'POST', 'PUT']);
+  if (method === 'DELETE') {
+    const id = positiveInt(req.query.id ?? req.body.id);
+    if (!id) return fail(res, 'ID de usuario obligatorio.', 422);
+    if (Number(requester.id) === id) {
+      return fail(res, 'No puedes eliminar tu propio usuario.', 409);
+    }
+
+    const deletion = await withTransaction(async (client) => {
+      const selected = await client.query(
+        'SELECT id, rol, zona, activo FROM usuarios WHERE id = $1 FOR UPDATE',
+        [id],
+      );
+      if (!selected.rowCount) return { error: 'Usuario no encontrado.', status: 404 };
+
+      const target = selected.rows[0];
+      if (managedRole && String(target.rol).trim().toLowerCase() !== managedRole) {
+        return { error: 'Solo puedes eliminar usuarios del área que administras.', status: 403 };
+      }
+      if (isTransitAdmin && !isTransitUser(target.rol, target.zona)) {
+        return { error: 'Solo puedes eliminar Operadores y Operadores de Pase de Ruta 11 o Ruta 86.', status: 403 };
+      }
+
+      const related = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM turnos WHERE usuario_id = $1 OR usuario_pase_id = $1
+           UNION ALL SELECT 1 FROM turno_historial WHERE usuario_id = $1
+           UNION ALL SELECT 1 FROM cargas_especiales WHERE usuario_id = $1
+           UNION ALL SELECT 1 FROM pase_libre_estado WHERE actualizado_por = $1
+           UNION ALL SELECT 1 FROM chat_sessions WHERE usuario_id = $1
+           UNION ALL SELECT 1 FROM chat_messages WHERE sender_id = $1 OR recipient_id = $1
+           UNION ALL SELECT 1 FROM push_notification_devices WHERE usuario_id = $1
+         ) AS has_related_data`,
+        [id],
+      );
+      if (related.rows[0]?.has_related_data) {
+        await client.query('UPDATE usuarios SET activo = 0 WHERE id = $1', [id]);
+        await client.query(
+          'UPDATE chat_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE usuario_id = $1 AND revoked_at IS NULL',
+          [id],
+        );
+        return { id, deactivated: true };
+      }
+
+      await client.query('DELETE FROM usuarios WHERE id = $1', [id]);
+      return { id, deactivated: false };
+    });
+
+    if (deletion.error) return fail(res, deletion.error, deletion.status);
+    return respond(
+      res,
+      true,
+      deletion.deactivated
+        ? 'El usuario tenía datos asociados y fue desactivado; sus datos se conservaron.'
+        : 'Usuario eliminado.',
+      { id: deletion.id, deactivated: deletion.deactivated },
+    );
+  }
+  return methodNotAllowed(res, ['GET', 'POST', 'PUT', 'DELETE']);
 }
 
 async function roles(req, res, authenticate) {

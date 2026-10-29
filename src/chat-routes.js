@@ -35,7 +35,8 @@ export function registerChatRoutes(app) {
            WHERE (m.sender_id = $1 AND m.recipient_id = u.id)
               OR (m.sender_id = u.id AND m.recipient_id = $1)
          )
-         WHERE u.id <> $1 ORDER BY recent.id IS NULL, recent.id DESC, u.nombre ASC`,
+         WHERE u.id <> $1 AND u.activo = 1
+         ORDER BY recent.id IS NULL, recent.id DESC, u.nombre ASC`,
         [req.chatUser.id],
       );
       const onlineIds = getChatOnlineUserIds();
@@ -95,7 +96,10 @@ export function registerChatRoutes(app) {
         return fail(res, 'Destinatario inválido.', 422);
       }
       if (!content || content.length > 2000) return fail(res, 'El mensaje debe tener entre 1 y 2000 caracteres.', 422);
-      const recipient = await pool.query('SELECT id FROM usuarios WHERE id = $1', [recipientId]);
+      const recipient = await pool.query(
+        'SELECT id FROM usuarios WHERE id = $1 AND activo = 1',
+        [recipientId],
+      );
       if (!recipient.rowCount) return fail(res, 'Usuario no encontrado.', 404);
 
       const result = await pool.query(

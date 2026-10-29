@@ -179,6 +179,92 @@ test('el admin de Tránsito solo crea usuarios en las zonas autorizadas', async 
   assert.equal(payload.success, true);
 });
 
+test('el usuario con datos asociados se desactiva y conserva sus datos', async (context) => {
+  const statements = [];
+  context.mock.method(pool, 'connect', async () => ({
+    query: async (sql, values = []) => {
+      statements.push(sql);
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('SELECT id, rol, zona, activo FROM usuarios')) {
+        assert.deepEqual(values, [45]);
+        return { rows: [{ id: 45, rol: 'operador', zona: 'Ruta 11', activo: 1 }], rowCount: 1 };
+      }
+      if (sql.includes('has_related_data')) {
+        assert.match(sql, /turno_historial/);
+        assert.match(sql, /chat_messages/);
+        assert.deepEqual(values, [45]);
+        return { rows: [{ has_related_data: 1 }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE usuarios SET activo = 0')) {
+        assert.deepEqual(values, [45]);
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE chat_sessions SET revoked_at')) {
+        assert.deepEqual(values, [45]);
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() {},
+  }));
+  const baseUrl = await startApp(context, (app) => registerAccountRoutes(app, {
+    authenticate: async () => ({ id: 92, rol: 'admin_transito' }),
+  }));
+
+  const response = await fetch(`${baseUrl}/api/usuarios?id=45`, {
+    method: 'DELETE',
+    headers: { authorization: '******' },
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.deactivated, true);
+  assert.match(payload.message, /fue desactivado/i);
+  assert.equal(statements.some((sql) => sql.includes('DELETE FROM usuarios')), false);
+  assert.ok(statements.includes('COMMIT'));
+});
+
+test('el usuario sin datos asociados se elimina definitivamente', async (context) => {
+  const statements = [];
+  context.mock.method(pool, 'connect', async () => ({
+    query: async (sql, values = []) => {
+      statements.push(sql);
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('SELECT id, rol, zona, activo FROM usuarios')) {
+        assert.deepEqual(values, [45]);
+        return { rows: [{ id: 45, rol: 'operador', zona: 'Ruta 11', activo: 1 }], rowCount: 1 };
+      }
+      if (sql.includes('has_related_data')) {
+        return { rows: [{ has_related_data: 0 }], rowCount: 1 };
+      }
+      if (sql.includes('DELETE FROM usuarios')) {
+        assert.deepEqual(values, [45]);
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() {},
+  }));
+  const baseUrl = await startApp(context, (app) => registerAccountRoutes(app, {
+    authenticate: async () => ({ id: 92, rol: 'admin_transito' }),
+  }));
+
+  const response = await fetch(`${baseUrl}/api/usuarios?id=45`, {
+    method: 'DELETE',
+    headers: { authorization: '******' },
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.deactivated, false);
+  assert.match(payload.message, /eliminado/i);
+  assert.ok(statements.some((sql) => sql.includes('DELETE FROM usuarios')));
+});
+
 test('el dashboard de Tránsito cuenta turnos Playa solo en Ruta 11 y Ruta 86', async (context) => {
   context.mock.method(pool, 'query', async (sql, values = []) => {
     assert.match(sql, /SELECT 'Ruta 11' AS nombre, 1 AS orden/);

@@ -162,7 +162,8 @@ export function createAduanaPushNotifier(database = pool, {
         `SELECT d.token FROM push_notification_devices d
          INNER JOIN usuarios u ON u.id = d.usuario_id
          INNER JOIN chat_sessions s ON s.token_hash = d.session_token_hash
-         WHERE s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+         WHERE u.activo = 1 AND s.revoked_at IS NULL
+           AND s.expires_at > CURRENT_TIMESTAMP
            AND (
              (LOWER(TRIM(u.rol)) = 'operador' AND EXISTS (
                SELECT 1 FROM zonas z
