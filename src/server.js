@@ -63,14 +63,6 @@ async function normalizeDefibaTurns() {
   }
 }
 
-await normalizeDefibaTurns();
-await ensureChatSchema();
-await ensureCargasEspecialesSchema();
-await ensureUsuarioSchema();
-await ensurePaseLibreSchema();
-await ensureTurnoSchema();
-await ensurePushNotificationSchema();
-
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Ruta no encontrada.', data: null });
 });
@@ -81,22 +73,39 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ success: false, message: 'Error interno del servidor.', data: null });
 });
 
-const port = Number(process.env.PORT || 3000);
-const host = process.env.HOST || '0.0.0.0';
-const server = createServer(app);
-const realtime = attachRealtime(server);
-server.listen(port, host, () => {
-  console.log(`Control Rutas Camiones Node API en http://${host}:${port}`);
-});
-const stopBocinaPoller = startBocinaPoller(pool);
+async function startServer() {
+  await normalizeDefibaTurns();
+  await ensureChatSchema();
+  await ensureCargasEspecialesSchema();
+  await ensureUsuarioSchema();
+  await ensurePaseLibreSchema();
+  await ensureTurnoSchema();
+  await ensurePushNotificationSchema();
 
-async function shutdown() {
-  stopBocinaPoller();
-  realtime.close(async () => {
-    await pool.end();
-    process.exit(0);
+  const port = Number(process.env.PORT || 3000);
+  const host = process.env.HOST || '0.0.0.0';
+  const server = createServer(app);
+  const realtime = attachRealtime(server);
+  server.listen(port, host, () => {
+    console.log(`Control Rutas Camiones Node API en http://${host}:${port}`);
   });
+
+  const stopBocinaPoller = startBocinaPoller(pool);
+  async function shutdown() {
+    stopBocinaPoller();
+    realtime.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+startServer().catch(async (error) => {
+  logError(error);
+  console.error('No se pudo iniciar el backend.');
+  await pool.end();
+  process.exitCode = 1;
+});
