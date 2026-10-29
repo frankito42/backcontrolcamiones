@@ -2,3 +2,5 @@
 node_modules/
 coverage/
 *.log
+database/migrations/exports/*.sql
+notificaciones-fcm.json

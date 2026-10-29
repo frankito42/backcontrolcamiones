@@ -23,23 +23,19 @@ export function registerChatRoutes(app) {
     try {
       const result = await pool.query(
         `SELECT u.id, u.nombre, u.rol, u.zona,
-                COALESCE(unread.count, 0)::int AS unread_count,
+                (SELECT COUNT(*) FROM chat_messages unread
+                 WHERE unread.sender_id = u.id AND unread.recipient_id = $1
+                   AND unread.read_at IS NULL)::int AS unread_count,
                 recent.id AS last_message_id, recent.sender_id AS last_sender_id,
                 recent.content AS last_message, recent.created_at AS last_message_at,
                 recent.delivered_at AS last_delivered_at, recent.read_at AS last_read_at
          FROM usuarios u
-         LEFT JOIN LATERAL (
-           SELECT COUNT(*) AS count FROM chat_messages m
-           WHERE m.sender_id = u.id AND m.recipient_id = $1 AND m.read_at IS NULL
-         ) unread ON TRUE
-         LEFT JOIN LATERAL (
-           SELECT m.id, m.sender_id, m.content, m.created_at, m.delivered_at, m.read_at
-           FROM chat_messages m
+         LEFT JOIN chat_messages recent ON recent.id = (
+           SELECT MAX(m.id) FROM chat_messages m
            WHERE (m.sender_id = $1 AND m.recipient_id = u.id)
               OR (m.sender_id = u.id AND m.recipient_id = $1)
-           ORDER BY m.id DESC LIMIT 1
-         ) recent ON TRUE
-         WHERE u.id <> $1 ORDER BY recent.id DESC NULLS LAST, u.nombre ASC`,
+         )
+         WHERE u.id <> $1 ORDER BY recent.id IS NULL, recent.id DESC, u.nombre ASC`,
         [req.chatUser.id],
       );
       const onlineIds = getChatOnlineUserIds();

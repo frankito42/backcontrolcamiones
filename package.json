@@ -7,10 +7,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test",
-    "db:create": "node scripts/create-database.js",
-    "db:schema": "node scripts/apply-schema.js",
-    "db:limpiar-operativo": "node scripts/limpiar-datos-operativos.js",
-    "db:migrate:mysql": "node scripts/migrate-mysql-to-postgres.js"
+    "db:export:mysql": "node scripts/export-postgres-tables-to-mysql.js"
   },
   "engines": {
     "node": ">=20"

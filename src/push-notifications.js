@@ -6,6 +6,7 @@ import { authenticateChatToken } from './chat-auth.js';
 import { fail, respond } from './helpers.js';
 
 const firebaseAppName = 'control-rutas-camiones-push';
+const maxDeviceTokenLength = 700;
 
 function bearerToken(req) {
   const authorization = req.headers.authorization || '';
@@ -26,7 +27,7 @@ function getFirebaseMessaging() {
 export async function ensurePushNotificationSchema(database = pool) {
   await database.query(`
     CREATE TABLE IF NOT EXISTS push_notification_devices (
-      token TEXT PRIMARY KEY,
+      token VARCHAR(700) PRIMARY KEY,
       usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
       session_token_hash CHAR(64) NOT NULL REFERENCES chat_sessions(token_hash) ON DELETE CASCADE,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -53,7 +54,7 @@ export function registerPushNotificationRoutes(app, {
         return fail(res, 'Las notificaciones de pedidos están disponibles solo para operadores y Defiba.', 403);
       }
       const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-      if (token.length < 20 || token.length > 4096) {
+      if (token.length < 20 || token.length > maxDeviceTokenLength) {
         return fail(res, 'El token del dispositivo no es válido.', 422);
       }
       await database.query(
@@ -81,7 +82,7 @@ export function registerPushNotificationRoutes(app, {
       const user = await authenticate(bearerToken(req));
       if (!user) return fail(res, 'La sesión expiró. Vuelve a iniciar sesión.', 401);
       const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-      if (token.length < 20 || token.length > 4096) {
+      if (token.length < 20 || token.length > maxDeviceTokenLength) {
         return fail(res, 'El token del dispositivo no es válido.', 422);
       }
       await database.query(

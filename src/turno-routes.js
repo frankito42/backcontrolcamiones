@@ -747,7 +747,11 @@ async function transitoDashboard(req, res, authenticate) {
 
   const result = await pool.query(
     `SELECT rutas.nombre AS zona_nombre, COUNT(t.id)::int AS cantidad
-     FROM (VALUES ('Ruta 11', 1), ('Ruta 86', 2)) AS rutas(nombre, orden)
+     FROM (
+       SELECT 'Ruta 11' AS nombre, 1 AS orden
+       UNION ALL
+       SELECT 'Ruta 86' AS nombre, 2 AS orden
+     ) AS rutas
      LEFT JOIN zonas z ON LOWER(BTRIM(z.nombre)) = LOWER(rutas.nombre)
      LEFT JOIN turnos t ON t.zona_id = z.id
        AND LOWER(BTRIM(t.estado)) = 'reservado'
@@ -806,6 +810,9 @@ async function aduanaFinalizados(req, res, authenticate) {
     return fail(res, 'No tienes permiso para consultar los finalizados de Aduana.', 403);
   }
 
+  const finalizedAt = `(SELECT MAX(h.registrado_en) FROM turno_historial h
+    WHERE h.turno_id = t.id AND h.estado = 'finalizado')`;
+  const finalizedAtWithFallback = `COALESCE(${finalizedAt}, TIMESTAMP(t.fecha_ingreso, t.hora_ingreso))`;
   const conditions = ["t.estado = 'finalizado'", 't.aduana_confirmado = TRUE'];
   const values = [];
   const add = (condition, value) => {
@@ -818,13 +825,13 @@ async function aduanaFinalizados(req, res, authenticate) {
   const desde = clean(req.query.desde);
   if (desde) {
     if (!validIsoDate(desde)) return fail(res, 'La fecha inicial no es válida.', 422);
-    add('COALESCE(finalizacion.finalizado_en, t.fecha_ingreso + t.hora_ingreso) >= ?::date', desde);
+    add(`${finalizedAtWithFallback} >= ?::date`, desde);
   }
   const hasta = clean(req.query.hasta);
   if (hasta) {
     if (!validIsoDate(hasta)) return fail(res, 'La fecha final no es válida.', 422);
     add(
-      "COALESCE(finalizacion.finalizado_en, t.fecha_ingreso + t.hora_ingreso) < (?::date + INTERVAL '1 day')",
+      `${finalizedAtWithFallback} < (?::date + INTERVAL '1 day')`,
       hasta,
     );
   }
@@ -837,17 +844,11 @@ async function aduanaFinalizados(req, res, authenticate) {
       't.estado, t.usuario_id, t.usuario_pase_id,',
       `t.estado, t.usuario_id, t.usuario_pase_id,
        (SELECT d.nombre FROM destinos d WHERE d.id = t.destino_id) AS destino_nombre,
-       COALESCE(finalizacion.finalizado_en, t.fecha_ingreso + t.hora_ingreso)
+       ${finalizedAtWithFallback}
          AS aduana_finalizado_en,`,
     )}
-     LEFT JOIN LATERAL (
-       SELECT MAX(h.registrado_en) AS finalizado_en
-       FROM turno_historial h
-       WHERE h.turno_id = t.id
-         AND h.estado = 'finalizado'
-     ) finalizacion ON TRUE
      WHERE ${conditions.join(' AND ')}
-     ORDER BY finalizacion.finalizado_en DESC, t.id DESC`,
+     ORDER BY ${finalizedAt} DESC, t.id DESC`,
     values,
   );
   return respond(

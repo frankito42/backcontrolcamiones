@@ -181,7 +181,8 @@ test('el admin de Tránsito solo crea usuarios en las zonas autorizadas', async 
 
 test('el dashboard de Tránsito cuenta turnos Playa solo en Ruta 11 y Ruta 86', async (context) => {
   context.mock.method(pool, 'query', async (sql, values = []) => {
-    assert.match(sql, /'Ruta 11', 1\), \('Ruta 86', 2/);
+    assert.match(sql, /SELECT 'Ruta 11' AS nombre, 1 AS orden/);
+    assert.match(sql, /SELECT 'Ruta 86' AS nombre, 2 AS orden/);
     assert.match(sql, /LOWER\(BTRIM\(t\.estado\)\) = 'reservado'/);
     assert.match(sql, /t\.aduana_confirmado = FALSE/);
     assert.deepEqual(values, []);
@@ -324,12 +325,13 @@ test('el panel de finalizados consulta solo cierres de Aduana por destino y fech
   context.mock.method(pool, 'query', async (sql, values = []) => {
     assert.match(sql, /t\.estado = 'finalizado'/);
     assert.match(sql, /t\.aduana_confirmado = TRUE/);
-    assert.match(sql, /LEFT JOIN LATERAL/);
+    assert.doesNotMatch(sql, /LATERAL/);
     assert.match(sql, /h\.estado = 'finalizado'/);
     assert.doesNotMatch(sql, /h\.origen = 'aduana'/);
     assert.match(sql, /t\.destino_id = \$1/);
-    assert.match(sql, /COALESCE\(finalizacion\.finalizado_en, t\.fecha_ingreso \+ t\.hora_ingreso\) >= \$2::date/);
-    assert.match(sql, /COALESCE\(finalizacion\.finalizado_en, t\.fecha_ingreso \+ t\.hora_ingreso\) < \(\$3::date \+ INTERVAL '1 day'\)/);
+    assert.match(sql, /COALESCE\(\(SELECT MAX\(h\.registrado_en\)/);
+    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) >= \$2::date/);
+    assert.match(sql, /TIMESTAMP\(t\.fecha_ingreso, t\.hora_ingreso\)\) < \(\$3::date \+ INTERVAL '1 day'\)/);
     assert.deepEqual(values, [9, '2026-10-01', '2026-10-20']);
     return {
       rows: [{

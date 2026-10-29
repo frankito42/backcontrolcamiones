@@ -71,7 +71,7 @@ export function createBocinaPoller(database, {
         `SELECT id, numero, patente FROM turnos
          WHERE bocina_pendiente=TRUE AND bocina_procesando=FALSE AND aduana_confirmado=TRUE
            AND estado NOT IN ('finalizado','anulado')
-         ORDER BY bocina_pendiente_en ASC NULLS LAST, id ASC LIMIT 20`,
+         ORDER BY bocina_pendiente_en IS NULL, bocina_pendiente_en ASC, id ASC LIMIT 20`,
       );
       await Promise.all(result.rows.map(announce));
     } catch (error) {
@@ -86,8 +86,8 @@ export function createBocinaPoller(database, {
 
 export function startBocinaPoller(database, options) {
   if (process.env.BOCINA_POLL_ENABLED === 'false') return () => {};
-  if (!process.env.DATABASE_URL && !process.env.PGPASSWORD) {
-    console.warn('[bocina] Polling deshabilitado: falta configurar DATABASE_URL o PGPASSWORD.');
+  if (!process.env.MYSQL_HOST || !process.env.MYSQL_DATABASE) {
+    console.warn('[bocina] Polling deshabilitado: falta configurar MySQL.');
     return () => {};
   }
   const poller = createBocinaPoller(database, options);

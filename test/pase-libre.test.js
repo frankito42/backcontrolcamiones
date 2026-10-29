@@ -156,6 +156,13 @@ test('el administrador de Aduana puede cambiar Pase Libre en cualquier destino',
         rowCount: 1,
       };
     }
+    if (sql.includes('SELECT activo, actualizado_en FROM pase_libre_destinos')) {
+      assert.deepEqual(values, [20]);
+      return {
+        rows: [{ activo: true, actualizado_en: '2026-10-02T12:01:00Z' }],
+        rowCount: 1,
+      };
+    }
     throw new Error(`Unexpected query: ${sql}`);
   });
   const baseUrl = await createServer(context, async (token) => token === 'aduana-token'

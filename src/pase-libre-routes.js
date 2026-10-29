@@ -91,18 +91,23 @@ export function registerPaseLibreRoutes(app, { authenticate = authenticateChatTo
             Number(user.rows[0].destino_id) !== destinoId))) {
         return fail(res, 'Solo Aduana puede modificar Pase Libre para su destino asignado.', 403);
       }
-      const result = await pool.query(
+      await pool.query(
         `INSERT INTO pase_libre_destinos (destino_id, activo, actualizado_por, actualizado_en)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
          ON CONFLICT (destino_id) DO UPDATE
          SET activo = EXCLUDED.activo, actualizado_por = EXCLUDED.actualizado_por,
-             actualizado_en = CURRENT_TIMESTAMP
-         RETURNING activo, actualizado_en`,
+             actualizado_en = CURRENT_TIMESTAMP`,
         [destinoId, req.body.activo, usuarioId],
       );
+      const currentState = await pool.query(
+        'SELECT activo, actualizado_en FROM pase_libre_destinos WHERE destino_id = $1',
+        [destinoId],
+      );
+      const updatedState = currentState.rows[0];
+      if (!updatedState) throw new Error('No se pudo leer el estado de Pase Libre actualizado.');
       const state = {
-        activo: result.rows[0].activo === true,
-        actualizado_en: result.rows[0].actualizado_en,
+        activo: updatedState.activo === true,
+        actualizado_en: updatedState.actualizado_en,
         destino_id: destinoId,
       };
       emitPaseLibreChanged(state.activo, destinoId);

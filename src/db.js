@@ -1,53 +1,43 @@
 import './config.js';
-import pg from 'pg';
-
-const { Pool, types } = pg;
-
-types.setTypeParser(20, (value) => Number(value));
-types.setTypeParser(1082, (value) => value);
-types.setTypeParser(1083, (value) => value);
-
-const ssl = process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false;
+import mysql from 'mysql2/promise';
+import { createMysqlPoolAdapter } from './mysql-dialect.js';
 
 export function assertDatabaseConfig() {
-  const connectionString = process.env.DATABASE_URL?.trim();
-  const separatePassword = process.env.PGPASSWORD;
-  if (!connectionString && separatePassword === undefined) {
-    throw new Error('Falta DATABASE_URL. Copia .env.example a .env y configura las credenciales de PostgreSQL.');
-  }
-  if (connectionString) {
-    let parsed;
-    try {
-      parsed = new URL(connectionString);
-    } catch {
-      throw new Error('DATABASE_URL no es válida. Usa postgresql://usuario:contraseña@host:5432/base.');
-    }
-    if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
-      throw new Error('DATABASE_URL debe usar el protocolo postgresql://.');
-    }
-    if (!parsed.password && separatePassword === undefined) {
-      throw new Error('DATABASE_URL no incluye contraseña. Usa postgresql://usuario:contraseña@host:5432/base o define PGPASSWORD.');
-    }
+  const required = ['MYSQL_HOST', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD'];
+  const missing = required.filter((key) => process.env[key] === undefined || process.env[key] === '');
+  if (missing.length) {
+    throw new Error(`Falta configurar MySQL en .env: ${missing.join(', ')}.`);
   }
 }
 
-const poolConfig = {
-  ...(process.env.DATABASE_URL?.trim() ? { connectionString: process.env.DATABASE_URL.trim() } : {}),
-  host: process.env.PGHOST,
-  port: Number(process.env.PGPORT || 5432),
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  ssl,
-  max: Number(process.env.PGPOOL_MAX || 10),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-};
-if (process.env.PGPASSWORD !== undefined) poolConfig.password = process.env.PGPASSWORD;
+assertDatabaseConfig();
 
-export const pool = new Pool(poolConfig);
+const mysqlPool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  port: Number(process.env.MYSQL_PORT || 3306),
+  database: process.env.MYSQL_DATABASE,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  waitForConnections: true,
+  connectionLimit: Number(process.env.MYSQL_POOL_MAX || 10),
+  connectTimeout: 10_000,
+  flags: ['FOUND_ROWS'],
+  dateStrings: true,
+  supportBigNumbers: true,
+  bigNumberStrings: false,
+  typeCast(field, next) {
+    if (field.type === 'TINY' && field.length === 1) {
+      const value = field.string();
+      return value === null ? null : value === '1';
+    }
+    return next();
+  },
+});
+
+export const pool = createMysqlPoolAdapter(mysqlPool);
 
 pool.on('error', (error) => {
-  console.error('Error inesperado del pool PostgreSQL:', error.message);
+  console.error('Error inesperado del pool MySQL:', error.message);
 });
 
 export async function withTransaction(callback) {
