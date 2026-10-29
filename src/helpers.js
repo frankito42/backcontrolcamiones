@@ -17,9 +17,10 @@ export function positiveInt(value, fallback = 0) {
 }
 
 export function publicBaseUrl(req) {
-  if (process.env.PUBLIC_BASE_URL) return new URL(process.env.PUBLIC_BASE_URL).origin;
   const protocol = req.get('x-forwarded-proto')?.split(',')[0] || req.protocol;
   const host = req.get('x-forwarded-host') || req.get('host');
+  if (host) return `${protocol}://${host}`;
+  if (process.env.PUBLIC_BASE_URL) return new URL(process.env.PUBLIC_BASE_URL).origin;
   return `${protocol}://${host}`;
 }
 

@@ -14,11 +14,18 @@ test('escapeHtml encodes markup and quotes', () => {
 });
 
 test('publicBaseUrl honors forwarded host and protocol', () => {
+  const previous = process.env.PUBLIC_BASE_URL;
+  process.env.PUBLIC_BASE_URL = 'https://old.example.test';
   const req = {
     get(name) {
       return { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'api.example.test' }[name];
     },
     protocol: 'http',
   };
-  assert.equal(publicBaseUrl(req), 'https://api.example.test');
+  try {
+    assert.equal(publicBaseUrl(req), 'https://api.example.test');
+  } finally {
+    if (previous === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previous;
+  }
 });

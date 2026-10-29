@@ -91,7 +91,6 @@ async function qrBoard(req, res) {
   const result = await pool.query('SELECT nombre FROM zonas WHERE id = $1', [zoneId]);
   if (!result.rowCount) return html(res, errorPage('Zona no encontrada.'), 404);
   const zoneName = escapeHtml(result.rows[0].nombre);
-  const base = publicBaseUrl(req);
   return html(res, `<!doctype html>
 <html lang="es">
 <head>
@@ -130,7 +129,7 @@ async function renew(){
   renewing=true;
   clearTimeout(renewalTimer);
   try{
-    const response=await fetch(${JSON.stringify(`${base}/api/qr/token?zona_id=${zoneId}`)},{cache:'no-store'});
+    const response=await fetch(${JSON.stringify(`/api/qr/token?zona_id=${zoneId}`)},{cache:'no-store'});
     const result=await response.json();
     if(!response.ok||!result.success)throw Error('No se pudo generar el QR');
     target.replaceChildren();
